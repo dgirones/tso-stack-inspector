@@ -1,0 +1,120 @@
+.tsosi-wrap {
+	max-width: 1200px;
+}
+
+.tsosi-wrap .tsosi-plugin-version {
+	font-size: 13px;
+	font-weight: 500;
+	color: #646970;
+	letter-spacing: 0.02em;
+}
+
+.tsosi-lang-form {
+	margin: 12px 0 16px;
+}
+
+.tsosi-tabs {
+	margin-bottom: 16px;
+}
+
+.tsosi-panel {
+	background: #fff;
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+	padding: 16px 20px;
+	margin-bottom: 20px;
+}
+
+.tsosi-tab-help {
+	margin: 0 0 16px;
+	max-width: 900px;
+}
+
+.tsosi-tab-help .description {
+	margin: 0 0 8px;
+}
+
+.tsosi-form-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	align-items: center;
+	margin-top: 12px;
+}
+
+.tsosi-form-row label {
+	font-weight: 600;
+	min-width: 120px;
+}
+
+.tsosi-form-row select,
+.tsosi-form-row input[type="text"] {
+	min-width: 280px;
+	max-width: 100%;
+}
+
+.tsosi-form-row-block {
+	align-items: flex-start;
+}
+
+.tsosi-block-picker {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	flex: 1 1 320px;
+	max-width: 100%;
+}
+
+.tsosi-block-picker select,
+.tsosi-block-picker input[type="text"] {
+	width: 100%;
+	min-width: 0;
+}
+
+.tsosi-field-help {
+	margin: 0;
+}
+
+.tsosi-scan-panel {
+	background: #fff;
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+	padding: 16px 20px;
+	margin-top: 16px;
+}
+
+.tsosi-progress {
+	margin: 8px 0 16px;
+	font-weight: 600;
+}
+
+.tsosi-scan-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin: 0 0 16px;
+}
+
+.tsosi-results-table td,
+.tsosi-results-table th {
+	vertical-align: top;
+}
+
+.tsosi-profile-details {
+	margin-top: 16px;
+}
+
+.tsosi-tag-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.tsosi-tag-list li {
+	background: #f0f0f1;
+	border-radius: 4px;
+	padding: 4px 8px;
+}
