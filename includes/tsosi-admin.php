@@ -59,15 +59,18 @@ function tsosi_admin_handle_language_switch() {
 	if ( ! is_admin() || ! current_user_can( 'manage_options' ) ) {
 		return;
 	}
-	$page = tsosi_get_admin_query_arg( 'page' );
+	if ( ! isset( $_GET[ TSOSI_ADMIN_QUERY_SET_LANG ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Presence gate only; check_admin_referer runs before update_user_meta.
+		return;
+	}
+	$page = isset( $_GET['page'] ) ? sanitize_text_field( wp_unslash( $_GET['page'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Presence gate only; check_admin_referer runs before update_user_meta.
 	if ( 'tso-stack-inspector' !== $page ) {
 		return;
 	}
-	$lang = tsosi_get_admin_query_arg( TSOSI_ADMIN_QUERY_SET_LANG );
+
+	tsosi_require_admin_form_nonce();
+
+	$lang = isset( $_GET[ TSOSI_ADMIN_QUERY_SET_LANG ] ) ? sanitize_key( wp_unslash( $_GET[ TSOSI_ADMIN_QUERY_SET_LANG ] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Nonce verified via check_admin_referer() above.
 	if ( '' === $lang ) {
-		return;
-	}
-	if ( ! tsosi_verify_admin_form_nonce() ) {
 		return;
 	}
 	tsosi_set_ui_lang( $lang );
@@ -493,9 +496,7 @@ function tsosi_admin_render_inventory_tab( $profiles ) {
  * @return void
  */
 function tsosi_ajax_scan_start() {
-	if ( ! current_user_can( 'manage_options' ) || ! tsosi_verify_ajax_nonce() ) {
-		wp_send_json_error( array( 'message' => __( 'Forbidden.', 'tso-stack-inspector' ) ), 403 );
-	}
+	tsosi_ajax_require_manage_options();
 
 	$mode = tsosi_get_ajax_post_text( 'mode', 'plugin' );
 	$query = array( 'mode' => sanitize_key( $mode ) );
@@ -548,9 +549,7 @@ add_action( 'wp_ajax_tsosi_scan_start', 'tsosi_ajax_scan_start' );
  * @return void
  */
 function tsosi_ajax_scan_step() {
-	if ( ! current_user_can( 'manage_options' ) || ! tsosi_verify_ajax_nonce() ) {
-		wp_send_json_error( array( 'message' => __( 'Forbidden.', 'tso-stack-inspector' ) ), 403 );
-	}
+	tsosi_ajax_require_manage_options();
 
 	$result = tsosi_scan_job_step();
 	if ( is_wp_error( $result ) ) {
@@ -567,9 +566,7 @@ add_action( 'wp_ajax_tsosi_scan_step', 'tsosi_ajax_scan_step' );
  * @return void
  */
 function tsosi_ajax_refresh_profiles() {
-	if ( ! current_user_can( 'manage_options' ) || ! tsosi_verify_ajax_nonce() ) {
-		wp_send_json_error( array( 'message' => __( 'Forbidden.', 'tso-stack-inspector' ) ), 403 );
-	}
+	tsosi_ajax_require_manage_options();
 	tsosi_flush_plugin_profile_cache();
 	$profiles = tsosi_get_all_plugin_profiles( true );
 	wp_send_json_success(

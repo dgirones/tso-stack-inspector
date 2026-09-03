@@ -66,27 +66,54 @@ if ( ! defined( 'TSOSI_ADMIN_QUERY_REPLACE_FROM' ) ) {
 }
 
 /**
- * Verify AJAX nonce.
+ * Verify AJAX nonce via WordPress core helper (soft fail).
  *
  * @return bool
  */
 function tsosi_verify_ajax_nonce() {
-	$nonce = isset( $_REQUEST['_ajax_nonce'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['_ajax_nonce'] ) ) : '';
-	if ( '' === $nonce ) {
-		return false;
-	}
-	return (bool) wp_verify_nonce( $nonce, TSOSI_NONCE_AJAX );
+	return (bool) check_ajax_referer( TSOSI_NONCE_AJAX, '_ajax_nonce', false );
 }
 
 /**
- * Verify admin form nonce.
+ * Require a valid AJAX nonce and manage_options. Sends JSON 403 and exits on failure.
+ *
+ * @return void
+ */
+function tsosi_ajax_require_manage_options() {
+	if ( ! check_ajax_referer( TSOSI_NONCE_AJAX, '_ajax_nonce', false ) ) {
+		wp_send_json_error( array( 'message' => __( 'Forbidden.', 'tso-stack-inspector' ) ), 403 );
+	}
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json_error( array( 'message' => __( 'Forbidden.', 'tso-stack-inspector' ) ), 403 );
+	}
+}
+
+/**
+ * Verify admin form nonce via WordPress core helper (dies on failure).
+ *
+ * @param string $query_arg Request key holding the nonce.
+ * @return void
+ */
+function tsosi_require_admin_form_nonce( $query_arg = '_wpnonce' ) {
+	$query_arg = sanitize_key( (string) $query_arg );
+	if ( '' === $query_arg ) {
+		$query_arg = '_wpnonce';
+	}
+	check_admin_referer( TSOSI_NONCE_FORM, $query_arg );
+}
+
+/**
+ * Soft-verify admin form nonce (legacy callers). Prefer tsosi_require_admin_form_nonce().
  *
  * @param string $query_arg Request key holding the nonce.
  * @return bool
  */
 function tsosi_verify_admin_form_nonce( $query_arg = '_wpnonce' ) {
-	$query_arg = (string) $query_arg;
-	$nonce     = isset( $_REQUEST[ $query_arg ] ) ? sanitize_text_field( wp_unslash( $_REQUEST[ $query_arg ] ) ) : '';
+	$query_arg = sanitize_key( (string) $query_arg );
+	if ( '' === $query_arg ) {
+		$query_arg = '_wpnonce';
+	}
+	$nonce = isset( $_REQUEST[ $query_arg ] ) ? sanitize_text_field( wp_unslash( $_REQUEST[ $query_arg ] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Verification itself; used only for soft bool return.
 	if ( '' === $nonce ) {
 		return false;
 	}
@@ -102,10 +129,10 @@ function tsosi_verify_admin_form_nonce( $query_arg = '_wpnonce' ) {
  */
 function tsosi_get_ajax_post_text( $key, $default = '' ) {
 	$key = (string) $key;
-	if ( '' === $key || ! isset( $_POST[ $key ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via tsosi_verify_ajax_nonce().
+	if ( '' === $key || ! isset( $_POST[ $key ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via check_ajax_referer() / tsosi_ajax_require_manage_options().
 		return $default;
 	}
-	return sanitize_text_field( (string) wp_unslash( $_POST[ $key ] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via tsosi_verify_ajax_nonce().
+	return sanitize_text_field( (string) wp_unslash( $_POST[ $key ] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via check_ajax_referer() / tsosi_ajax_require_manage_options().
 }
 
 /**
@@ -132,10 +159,10 @@ function tsosi_get_admin_query_arg( $key, $default = '' ) {
  */
 function tsosi_get_admin_post_text( $key, $default = '' ) {
 	$key = (string) $key;
-	if ( '' === $key || ! isset( $_POST[ $key ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via tsosi_verify_admin_form_nonce().
+	if ( '' === $key || ! isset( $_POST[ $key ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via check_admin_referer() / tsosi_require_admin_form_nonce().
 		return $default;
 	}
-	return sanitize_text_field( (string) wp_unslash( $_POST[ $key ] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via tsosi_verify_admin_form_nonce().
+	return sanitize_text_field( (string) wp_unslash( $_POST[ $key ] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via check_admin_referer() / tsosi_require_admin_form_nonce().
 }
 
 /**
@@ -147,10 +174,10 @@ function tsosi_get_admin_post_text( $key, $default = '' ) {
  */
 function tsosi_get_admin_post_textarea( $key, $default = '' ) {
 	$key = (string) $key;
-	if ( '' === $key || ! isset( $_POST[ $key ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via tsosi_verify_admin_form_nonce().
+	if ( '' === $key || ! isset( $_POST[ $key ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via check_admin_referer() / tsosi_require_admin_form_nonce().
 		return $default;
 	}
-	return sanitize_textarea_field( (string) wp_unslash( $_POST[ $key ] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via tsosi_verify_admin_form_nonce().
+	return sanitize_textarea_field( (string) wp_unslash( $_POST[ $key ] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via check_admin_referer() / tsosi_require_admin_form_nonce().
 }
 
 /**
@@ -221,10 +248,10 @@ function tsosi_scan_value_is_ignored( $value ) {
  */
 function tsosi_get_admin_post_checkbox( $key ) {
 	$key = (string) $key;
-	if ( '' === $key || ! isset( $_POST[ $key ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via tsosi_verify_admin_form_nonce().
+	if ( '' === $key || ! isset( $_POST[ $key ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via check_admin_referer() / tsosi_require_admin_form_nonce().
 		return false;
 	}
-	return ! empty( $_POST[ $key ] ); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via tsosi_verify_admin_form_nonce().
+	return ! empty( $_POST[ $key ] ); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via check_admin_referer() / tsosi_require_admin_form_nonce().
 }
 
 /**
@@ -235,10 +262,10 @@ function tsosi_get_admin_post_checkbox( $key ) {
  */
 function tsosi_get_admin_post_array( $key ) {
 	$key = (string) $key;
-	if ( '' === $key || ! isset( $_POST[ $key ] ) || ! is_array( $_POST[ $key ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via tsosi_verify_admin_form_nonce().
+	if ( '' === $key || ! isset( $_POST[ $key ] ) || ! is_array( $_POST[ $key ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via check_admin_referer() / tsosi_require_admin_form_nonce().
 		return array();
 	}
-	$raw = wp_unslash( $_POST[ $key ] ); // phpcs:ignore WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Caller verified via tsosi_verify_admin_form_nonce(); values sanitized via sanitize_key below.
+	$raw = wp_unslash( $_POST[ $key ] ); // phpcs:ignore WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Caller verified via check_admin_referer() / tsosi_require_admin_form_nonce(); values sanitized via sanitize_key below.
 	if ( ! is_array( $raw ) ) {
 		return array();
 	}

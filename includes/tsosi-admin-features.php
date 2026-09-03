@@ -27,16 +27,15 @@ function tsosi_admin_handle_settings_save() {
 	if ( ! is_admin() || ! current_user_can( 'manage_options' ) ) {
 		return;
 	}
+	if ( ! isset( $_POST['tsosi_save_settings'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Presence gate only; check_admin_referer runs before any settings write.
+		return;
+	}
 	$page = tsosi_get_admin_query_arg( 'page' );
 	if ( 'tso-stack-inspector' !== $page ) {
 		return;
 	}
-	if ( '1' !== tsosi_get_admin_post_text( 'tsosi_save_settings' ) ) {
-		return;
-	}
-	if ( ! tsosi_verify_admin_form_nonce() ) {
-		return;
-	}
+
+	tsosi_require_admin_form_nonce();
 
 	$statuses = tsosi_get_admin_post_array( 'tsosi_post_statuses' );
 
@@ -684,9 +683,7 @@ function tsosi_admin_render_history_tab() {
  * @return void
  */
 function tsosi_ajax_scan_cancel() {
-	if ( ! current_user_can( 'manage_options' ) || ! tsosi_verify_ajax_nonce() ) {
-		wp_send_json_error( array( 'message' => __( 'Forbidden.', 'tso-stack-inspector' ) ), 403 );
-	}
+	tsosi_ajax_require_manage_options();
 	tsosi_scan_job_cancel();
 	wp_send_json_success(
 		array(
@@ -706,9 +703,7 @@ add_action( 'wp_ajax_tsosi_scan_cancel', 'tsosi_ajax_scan_cancel' );
  * @return void
  */
 function tsosi_ajax_rebuild_cache() {
-	if ( ! current_user_can( 'manage_options' ) || ! tsosi_verify_ajax_nonce() ) {
-		wp_send_json_error( array( 'message' => __( 'Forbidden.', 'tso-stack-inspector' ) ), 403 );
-	}
+	tsosi_ajax_require_manage_options();
 	tsosi_scan_job_cancel();
 	tsosi_index_job_cancel();
 	tsosi_scan_rebuild_content_cache();
@@ -732,9 +727,7 @@ add_action( 'wp_ajax_tsosi_rebuild_cache', 'tsosi_ajax_rebuild_cache' );
  * @return void
  */
 function tsosi_ajax_index_start() {
-	if ( ! current_user_can( 'manage_options' ) || ! tsosi_verify_ajax_nonce() ) {
-		wp_send_json_error( array( 'message' => __( 'Forbidden.', 'tso-stack-inspector' ) ), 403 );
-	}
+	tsosi_ajax_require_manage_options();
 	$force = '1' === tsosi_get_ajax_post_text( 'force' );
 	$start = tsosi_index_job_start( $force );
 	if ( is_wp_error( $start ) ) {
@@ -755,9 +748,7 @@ add_action( 'wp_ajax_tsosi_index_start', 'tsosi_ajax_index_start' );
  * @return void
  */
 function tsosi_ajax_index_step() {
-	if ( ! current_user_can( 'manage_options' ) || ! tsosi_verify_ajax_nonce() ) {
-		wp_send_json_error( array( 'message' => __( 'Forbidden.', 'tso-stack-inspector' ) ), 403 );
-	}
+	tsosi_ajax_require_manage_options();
 	$step = tsosi_index_job_step();
 	if ( is_wp_error( $step ) ) {
 		wp_send_json_error(
@@ -777,9 +768,7 @@ add_action( 'wp_ajax_tsosi_index_step', 'tsosi_ajax_index_step' );
  * @return void
  */
 function tsosi_ajax_theme_profile() {
-	if ( ! current_user_can( 'manage_options' ) || ! tsosi_verify_ajax_nonce() ) {
-		wp_send_json_error( array( 'message' => __( 'Forbidden.', 'tso-stack-inspector' ) ), 403 );
-	}
+	tsosi_ajax_require_manage_options();
 
 	$stylesheet = tsosi_sanitize_theme_stylesheet( tsosi_get_ajax_post_text( 'theme' ) );
 	if ( '' === $stylesheet ) {
@@ -803,9 +792,7 @@ add_action( 'wp_ajax_tsosi_theme_profile', 'tsosi_ajax_theme_profile' );
  * @return void
  */
 function tsosi_ajax_compare_plugins() {
-	if ( ! current_user_can( 'manage_options' ) || ! tsosi_verify_ajax_nonce() ) {
-		wp_send_json_error( array( 'message' => __( 'Forbidden.', 'tso-stack-inspector' ) ), 403 );
-	}
+	tsosi_ajax_require_manage_options();
 	$a = tsosi_sanitize_plugin_file( tsosi_get_ajax_post_text( 'plugin_a' ) );
 	$b = tsosi_sanitize_plugin_file( tsosi_get_ajax_post_text( 'plugin_b' ) );
 	if ( '' === $a || '' === $b ) {
@@ -821,9 +808,7 @@ add_action( 'wp_ajax_tsosi_compare_plugins', 'tsosi_ajax_compare_plugins' );
  * @return void
  */
 function tsosi_ajax_load_history() {
-	if ( ! current_user_can( 'manage_options' ) || ! tsosi_verify_ajax_nonce() ) {
-		wp_send_json_error( array( 'message' => __( 'Forbidden.', 'tso-stack-inspector' ) ), 403 );
-	}
+	tsosi_ajax_require_manage_options();
 	$id   = tsosi_get_ajax_post_text( 'history_id' );
 	$data = tsosi_scan_history_load( $id );
 	if ( ! is_array( $data ) ) {
@@ -839,9 +824,7 @@ add_action( 'wp_ajax_tsosi_load_history', 'tsosi_ajax_load_history' );
  * @return void
  */
 function tsosi_ajax_delete_history() {
-	if ( ! current_user_can( 'manage_options' ) || ! tsosi_verify_ajax_nonce() ) {
-		wp_send_json_error( array( 'message' => __( 'Forbidden.', 'tso-stack-inspector' ) ), 403 );
-	}
+	tsosi_ajax_require_manage_options();
 	$id = tsosi_get_ajax_post_text( 'history_id' );
 	if ( ! tsosi_scan_history_delete( $id ) ) {
 		wp_send_json_error(
@@ -872,9 +855,7 @@ add_action( 'wp_ajax_tsosi_delete_history', 'tsosi_ajax_delete_history' );
  * @return void
  */
 function tsosi_ajax_clear_history() {
-	if ( ! current_user_can( 'manage_options' ) || ! tsosi_verify_ajax_nonce() ) {
-		wp_send_json_error( array( 'message' => __( 'Forbidden.', 'tso-stack-inspector' ) ), 403 );
-	}
+	tsosi_ajax_require_manage_options();
 	tsosi_scan_history_delete_all();
 	wp_send_json_success(
 		array(
@@ -894,9 +875,7 @@ add_action( 'wp_ajax_tsosi_clear_history', 'tsosi_ajax_clear_history' );
  * @return void
  */
 function tsosi_ajax_audit_inactive() {
-	if ( ! current_user_can( 'manage_options' ) || ! tsosi_verify_ajax_nonce() ) {
-		wp_send_json_error( array( 'message' => __( 'Forbidden.', 'tso-stack-inspector' ) ), 403 );
-	}
+	tsosi_ajax_require_manage_options();
 
 	$result = tsosi_audit_inactive_plugins();
 	if ( is_wp_error( $result ) ) {
@@ -918,9 +897,7 @@ add_action( 'wp_ajax_tsosi_audit_inactive', 'tsosi_ajax_audit_inactive' );
  * @return void
  */
 function tsosi_ajax_replace_preview() {
-	if ( ! current_user_can( 'manage_options' ) || ! tsosi_verify_ajax_nonce() ) {
-		wp_send_json_error( array( 'message' => __( 'Forbidden.', 'tso-stack-inspector' ) ), 403 );
-	}
+	tsosi_ajax_require_manage_options();
 	$kind = tsosi_get_ajax_post_text( 'kind', 'shortcode' );
 	$from = tsosi_get_ajax_post_text( 'from' );
 	$to   = tsosi_get_ajax_post_text( 'to' );
@@ -938,9 +915,7 @@ add_action( 'wp_ajax_tsosi_replace_preview', 'tsosi_ajax_replace_preview' );
  * @return void
  */
 function tsosi_ajax_replace_apply() {
-	if ( ! current_user_can( 'manage_options' ) || ! tsosi_verify_ajax_nonce() ) {
-		wp_send_json_error( array( 'message' => __( 'Forbidden.', 'tso-stack-inspector' ) ), 403 );
-	}
+	tsosi_ajax_require_manage_options();
 	$kind = tsosi_get_ajax_post_text( 'kind', 'shortcode' );
 	$from = tsosi_get_ajax_post_text( 'from' );
 	$to   = tsosi_get_ajax_post_text( 'to' );
@@ -961,9 +936,7 @@ add_action( 'wp_ajax_tsosi_replace_apply', 'tsosi_ajax_replace_apply' );
  * @return void
  */
 function tsosi_ajax_replace_undo() {
-	if ( ! current_user_can( 'manage_options' ) || ! tsosi_verify_ajax_nonce() ) {
-		wp_send_json_error( array( 'message' => __( 'Forbidden.', 'tso-stack-inspector' ) ), 403 );
-	}
+	tsosi_ajax_require_manage_options();
 	$id     = tsosi_get_ajax_post_text( 'backup_id' );
 	$result = tsosi_replace_backup_undo( $id );
 	if ( is_wp_error( $result ) ) {
@@ -979,9 +952,7 @@ add_action( 'wp_ajax_tsosi_replace_undo', 'tsosi_ajax_replace_undo' );
  * @return void
  */
 function tsosi_ajax_find_orphans() {
-	if ( ! current_user_can( 'manage_options' ) || ! tsosi_verify_ajax_nonce() ) {
-		wp_send_json_error( array( 'message' => __( 'Forbidden.', 'tso-stack-inspector' ) ), 403 );
-	}
+	tsosi_ajax_require_manage_options();
 	$result = tsosi_orphans_find();
 	if ( is_wp_error( $result ) ) {
 		wp_send_json_error(
@@ -1001,9 +972,7 @@ add_action( 'wp_ajax_tsosi_find_orphans', 'tsosi_ajax_find_orphans' );
  * @return void
  */
 function tsosi_ajax_history_diff() {
-	if ( ! current_user_can( 'manage_options' ) || ! tsosi_verify_ajax_nonce() ) {
-		wp_send_json_error( array( 'message' => __( 'Forbidden.', 'tso-stack-inspector' ) ), 403 );
-	}
+	tsosi_ajax_require_manage_options();
 	$a = tsosi_get_ajax_post_text( 'id_a' );
 	$b = tsosi_get_ajax_post_text( 'id_b' );
 	$result = tsosi_scan_history_diff( $a, $b );
@@ -1020,9 +989,7 @@ add_action( 'wp_ajax_tsosi_history_diff', 'tsosi_ajax_history_diff' );
  * @return void
  */
 function tsosi_ajax_scan_poll() {
-	if ( ! current_user_can( 'manage_options' ) || ! tsosi_verify_ajax_nonce() ) {
-		wp_send_json_error( array( 'message' => __( 'Forbidden.', 'tso-stack-inspector' ) ), 403 );
-	}
+	tsosi_ajax_require_manage_options();
 	$done = tsosi_background_get_completed_result();
 	if ( is_array( $done ) ) {
 		wp_send_json_success( $done );
