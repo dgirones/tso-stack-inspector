@@ -44,7 +44,7 @@ function tsosi_plugin_action_links( $links ) {
 	if ( ! current_user_can( 'manage_options' ) ) {
 		return $links;
 	}
-	$open = '<a href="' . esc_url( tsosi_admin_page_url() ) . '">' . esc_html__( 'Open inspector', 'tso-stack-inspector' ) . '</a>';
+	$open = '<a href="' . esc_url( tsosi_admin_page_url() ) . '">' . esc_html( tsosi_get_open_inspector_link_label() ) . '</a>';
 	array_unshift( $links, $open );
 	return $links;
 }
@@ -89,9 +89,11 @@ function tsosi_admin_render_page() {
 	nocache_headers();
 
 	$tab = tsosi_get_admin_query_arg( 'tab', 'plugin' );
-	if ( ! in_array( $tab, array( 'plugin', 'shortcode', 'block', 'inventory' ), true ) ) {
+	if ( ! in_array( $tab, tsosi_admin_tab_slugs(), true ) ) {
 		$tab = 'plugin';
 	}
+
+	$preselect_plugin = tsosi_sanitize_plugin_file( tsosi_get_admin_query_arg( 'plugin_file' ) );
 
 	$base_url = admin_url( 'tools.php?page=tso-stack-inspector' );
 	$plugins  = tsosi_get_installed_plugins();
@@ -129,24 +131,75 @@ function tsosi_admin_render_page() {
 		echo '<p><a class="button button-secondary" href="' . esc_url( $cleaner ) . '">' . esc_html( $txt_cleaner ) . '</a></p>';
 	}
 
+	tsosi_admin_render_cache_bar();
 	tsosi_admin_render_tabs( $base_url, $tab );
 
 	if ( 'plugin' === $tab ) {
-		tsosi_admin_render_plugin_tab( $plugins, $profiles );
+		tsosi_admin_render_plugin_tab( $plugins, $profiles, $preselect_plugin );
 	} elseif ( 'shortcode' === $tab ) {
 		tsosi_admin_render_shortcode_tab();
 	} elseif ( 'block' === $tab ) {
 		tsosi_admin_render_block_tab();
+	} elseif ( 'replace' === $tab ) {
+		tsosi_admin_render_replace_tab();
+	} elseif ( 'orphans' === $tab ) {
+		tsosi_admin_render_orphans_tab();
+	} elseif ( 'theme' === $tab ) {
+		tsosi_admin_render_theme_tab();
+	} elseif ( 'compare' === $tab ) {
+		tsosi_admin_render_compare_tab( $plugins );
+	} elseif ( 'inactive' === $tab ) {
+		tsosi_admin_render_inactive_tab( $plugins );
+	} elseif ( 'history' === $tab ) {
+		tsosi_admin_render_history_tab();
+	} elseif ( 'settings' === $tab ) {
+		tsosi_admin_render_settings_tab();
 	} else {
 		tsosi_admin_render_inventory_tab( $profiles );
 	}
 
 	echo '<div id="tsosi-scan-panel" class="tsosi-scan-panel" hidden>';
 	echo '<h2>' . esc_html( tsosi_ui_triple_text( 'Scan results', 'Resultados del escaneo', 'Resultats de l\'escaneig' ) ) . '</h2>';
+	echo '<div id="tsosi-risk-banner" class="tsosi-risk-banner" hidden></div>';
 	echo '<div id="tsosi-scan-progress" class="tsosi-progress" aria-live="polite"></div>';
+	echo '<div id="tsosi-scan-toolbar" class="tsosi-scan-toolbar" hidden>';
+	echo '<label class="screen-reader-text" for="tsosi-filter-results">' . esc_html( tsosi_ui_triple_text( 'Filter results', 'Filtrar resultados', 'Filtrar resultats' ) ) . '</label>';
+	echo '<input type="search" id="tsosi-filter-results" class="tsosi-filter-input" placeholder="' . esc_attr( tsosi_ui_triple_text( 'Filter results…', 'Filtrar resultados…', 'Filtrar resultats…' ) ) . '" />';
+	echo '<select id="tsosi-filter-type"><option value="">' . esc_html( tsosi_ui_triple_text( 'All types', 'Todos los tipos', 'Tots els tipus' ) ) . '</option>';
+	echo '<option value="shortcode">shortcode</option><option value="block">block</option><option value="meta">meta</option>';
+	echo '<option value="widget">widget</option><option value="option">option</option><option value="menu">menu</option></select>';
+	echo '<select id="tsosi-filter-bucket" aria-label="' . esc_attr( tsosi_ui_triple_text( 'Content or data', 'Contenido o datos', 'Contingut o dades' ) ) . '">';
+	echo '<option value="">' . esc_html( tsosi_ui_triple_text( 'All matches', 'Todas las coincidencias', 'Totes les coincidències' ) ) . '</option>';
+	echo '<option value="content">' . esc_html( tsosi_ui_triple_text( 'Content only (shortcode/block)', 'Solo contenido (shortcode/bloque)', 'Només contingut (shortcode/bloc)' ) ) . '</option>';
+	echo '<option value="data">' . esc_html( tsosi_ui_triple_text( 'Data only (meta/options/…)', 'Solo datos (meta/opciones/…)', 'Només dades (meta/opcions/…)' ) ) . '</option>';
+	echo '</select>';
+	echo '<label class="tsosi-check-row tsosi-group-toggle"><input type="checkbox" id="tsosi-group-results" checked /> ';
+	echo esc_html( tsosi_ui_triple_text( 'Group by location', 'Agrupar por ubicación', 'Agrupar per ubicació' ) );
+	echo '</label>';
+	echo '<span id="tsosi-filter-count" class="tsosi-filter-count"></span>';
+	echo '<button type="button" class="button" id="tsosi-cancel-scan">' . esc_html( tsosi_ui_triple_text( 'Cancel scan', 'Cancelar escaneo', 'Cancel·lar escaneig' ) ) . '</button>';
+	echo '</div>';
 	echo '<div id="tsosi-scan-actions" class="tsosi-scan-actions" hidden>';
+	echo '<label class="tsosi-check-row tsosi-background-option"><input type="checkbox" id="tsosi-background-scan" /> ';
+	echo esc_html( tsosi_ui_triple_text( 'Run in background (close tab OK)', 'Ejecutar en segundo plano', 'Executar en segon pla' ) );
+	echo '</label>';
 	echo '<button type="button" class="button" id="tsosi-export-csv">' . esc_html( tsosi_ui_triple_text( 'Export CSV', 'Exportar CSV', 'Exportar CSV' ) ) . '</button>';
 	echo '<button type="button" class="button" id="tsosi-export-pdf">' . esc_html( tsosi_ui_triple_text( 'Print / PDF', 'Imprimir / PDF', 'Imprimir / PDF' ) ) . '</button>';
+	$cleaner_plugin_url = tsosi_get_options_cleaner_scan_url( $preselect_plugin );
+	echo '<a class="button button-secondary" id="tsosi-open-cleaner" href="' . esc_url( $cleaner_plugin_url ? $cleaner_plugin_url : '#' ) . '"' . ( $cleaner_plugin_url ? '' : ' hidden' ) . '>';
+	echo esc_html( tsosi_ui_triple_text( 'Clean leftovers in Options Cleaner', 'Limpiar restos en Options Cleaner', 'Netejar restes a Options Cleaner' ) );
+	echo '</a>';
+	if ( ! tsosi_options_cleaner_is_available() ) {
+		echo '<span id="tsosi-cleaner-missing" class="description">';
+		echo esc_html(
+			tsosi_ui_triple_text(
+				'Install/activate TSO Options & Tables Cleaner to remove leftover options and tables after uninstall.',
+				'Instala/activa TSO Options & Tables Cleaner para borrar opciones y tablas sobrantes tras desinstalar.',
+				'Instal·la/activa TSO Options & Tables Cleaner per esborrar opcions i taules sobrants després de desinstal·lar.'
+			)
+		);
+		echo '</span>';
+	}
 	echo '</div>';
 	echo '<table class="widefat striped tsosi-results-table"><thead><tr>';
 	echo '<th>' . esc_html( tsosi_ui_triple_text( 'Location', 'Ubicación', 'Ubicació' ) ) . '</th>';
@@ -188,7 +241,14 @@ function tsosi_admin_render_tabs( $base_url, $tab ) {
 		'plugin'    => tsosi_ui_triple_text( 'By plugin', 'Por plugin', 'Per plugin' ),
 		'shortcode' => tsosi_ui_triple_text( 'Shortcode', 'Shortcode', 'Shortcode' ),
 		'block'     => tsosi_ui_triple_text( 'Block', 'Bloque', 'Bloc' ),
+		'replace'   => tsosi_ui_triple_text( 'Replace', 'Sustituir', 'Substituir' ),
+		'orphans'   => tsosi_ui_triple_text( 'Orphans', 'Huérfanos', 'Orfes' ),
+		'theme'     => tsosi_ui_triple_text( 'Theme', 'Tema', 'Tema' ),
+		'compare'   => tsosi_ui_triple_text( 'Compare', 'Comparar', 'Comparar' ),
+		'inactive'  => tsosi_ui_triple_text( 'Inactive', 'Inactivos', 'Inactius' ),
 		'inventory' => tsosi_ui_triple_text( 'Inventory', 'Inventario', 'Inventari' ),
+		'history'   => tsosi_ui_triple_text( 'History', 'Historial', 'Historial' ),
+		'settings'  => tsosi_ui_triple_text( 'Settings', 'Ajustes', 'Opcions' ),
 	);
 	echo '<nav class="nav-tab-wrapper tsosi-tabs">';
 	foreach ( $tabs as $slug => $label ) {
@@ -202,9 +262,10 @@ function tsosi_admin_render_tabs( $base_url, $tab ) {
 /**
  * @param array<string,array<string,string>> $plugins  Plugins.
  * @param array<string,array<string,mixed>>  $profiles Profiles.
+ * @param string                              $preselect Optional plugin file to preselect.
  * @return void
  */
-function tsosi_admin_render_plugin_tab( $plugins, $profiles ) {
+function tsosi_admin_render_plugin_tab( $plugins, $profiles, $preselect = '' ) {
 	echo '<div class="tsosi-panel">';
 	echo '<h2>' . esc_html( tsosi_ui_triple_text( 'Before uninstall', 'Antes de desinstalar', 'Abans de desinstal·lar' ) ) . '</h2>';
 	echo '<p>' . esc_html( tsosi_ui_triple_text(
@@ -221,12 +282,13 @@ function tsosi_admin_render_plugin_tab( $plugins, $profiles ) {
 		$name   = isset( $header['Name'] ) ? (string) $header['Name'] : $file;
 		$active = tsosi_is_plugin_active_file( $file );
 		$label  = $name . ( $active ? '' : ' (' . tsosi_ui_triple_text( 'inactive', 'inactivo', 'inactiu' ) . ')' );
-		echo '<option value="' . esc_attr( $file ) . '">' . esc_html( $label ) . '</option>';
+		echo '<option value="' . esc_attr( $file ) . '"' . selected( $preselect, $file, false ) . '>' . esc_html( $label ) . '</option>';
 	}
 	echo '</select>';
 	echo '<button type="button" class="button button-primary tsosi-start-scan" data-mode="plugin">' . esc_html( tsosi_ui_triple_text( 'Start scan', 'Iniciar escaneo', 'Iniciar escaneig' ) ) . '</button>';
 	echo '<button type="button" class="button tsosi-refresh-profiles" id="tsosi-refresh-profiles">' . esc_html( tsosi_ui_triple_text( 'Refresh signatures', 'Actualizar firmas', 'Actualitzar signatures' ) ) . '</button>';
 	echo '</div>';
+	tsosi_admin_echo_help( tsosi_admin_signatures_help_text() );
 
 	if ( ! empty( $profiles ) ) {
 		echo '<details class="tsosi-profile-details"><summary>' . esc_html( tsosi_ui_triple_text( 'Discovered signatures (cached 24h)', 'Firmas detectadas (caché 24h)', 'Signatures detectades (memòria cau 24h)' ) ) . '</summary>';
@@ -402,6 +464,7 @@ function tsosi_admin_render_inventory_tab( $profiles ) {
 	echo '</ul>';
 
 	echo '<h2>' . esc_html( tsosi_ui_triple_text( 'Plugin signatures', 'Firmas de plugins', 'Signatures de plugins' ) ) . '</h2>';
+	tsosi_admin_echo_help( tsosi_admin_signatures_help_text() );
 	echo '<p><button type="button" class="button tsosi-refresh-profiles" id="tsosi-refresh-profiles-inventory">' . esc_html( tsosi_ui_triple_text( 'Refresh signatures', 'Actualizar firmas', 'Actualitzar signatures' ) ) . '</button></p>';
 	echo '<table class="widefat striped"><thead><tr>';
 	echo '<th>' . esc_html( tsosi_ui_triple_text( 'Plugin', 'Plugin', 'Plugin' ) ) . '</th>';
@@ -452,13 +515,27 @@ function tsosi_ajax_scan_start() {
 		if ( '' === $query['block'] ) {
 			wp_send_json_error( array( 'message' => __( 'Enter a block name.', 'tso-stack-inspector' ) ) );
 		}
+	} elseif ( 'theme' === $mode ) {
+		$query['theme'] = tsosi_sanitize_theme_stylesheet( tsosi_get_ajax_post_text( 'theme', wp_get_theme()->get_stylesheet() ) );
+		if ( '' === $query['theme'] ) {
+			wp_send_json_error( array( 'message' => __( 'Select a valid theme.', 'tso-stack-inspector' ) ) );
+		}
 	} else {
 		wp_send_json_error( array( 'message' => __( 'Invalid scan mode.', 'tso-stack-inspector' ) ) );
+	}
+
+	if ( '1' === tsosi_get_ajax_post_text( 'background' ) ) {
+		$query['background'] = true;
 	}
 
 	$result = tsosi_scan_job_start( $query );
 	if ( is_wp_error( $result ) ) {
 		wp_send_json_error( array( 'message' => $result->get_error_message() ) );
+	}
+
+	if ( ! empty( $query['background'] ) && empty( $result['done'] ) ) {
+		tsosi_background_register_job( get_current_user_id() );
+		$result['background'] = true;
 	}
 
 	wp_send_json_success( $result );

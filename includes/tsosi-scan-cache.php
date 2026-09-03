@@ -14,7 +14,7 @@ if ( ! defined( 'TSOSI_TRANSIENT_CONTENT_CACHE_PREFIX' ) ) {
 }
 
 if ( ! defined( 'TSOSI_CONTENT_CACHE_TTL' ) ) {
-	define( 'TSOSI_CONTENT_CACHE_TTL', HOUR_IN_SECONDS );
+	define( 'TSOSI_CONTENT_CACHE_TTL', DAY_IN_SECONDS );
 }
 
 /**
@@ -31,7 +31,7 @@ function tsosi_content_cache_transient_key() {
 }
 
 /**
- * Delete cached site index (all users on single site: current user only).
+ * Delete cached site index for the current user (files + transient).
  *
  * @return void
  */
@@ -39,6 +39,40 @@ function tsosi_flush_content_cache() {
 	delete_transient( tsosi_content_cache_transient_key() );
 	tsosi_scan_delete_build_index();
 	tsosi_scan_delete_user_cache_files();
+}
+
+/**
+ * Delete content-index caches for every user (transients + uploads JSON).
+ *
+ * @return void
+ */
+function tsosi_flush_all_content_caches() {
+	global $wpdb;
+
+	$like         = '_transient_' . $wpdb->esc_like( TSOSI_TRANSIENT_CONTENT_CACHE_PREFIX ) . '%';
+	$like_timeout = '_transient_timeout_' . $wpdb->esc_like( TSOSI_TRANSIENT_CONTENT_CACHE_PREFIX ) . '%';
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- admin flush of all content-cache transients.
+	$wpdb->query(
+		$wpdb->prepare(
+			"DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s",
+			$like,
+			$like_timeout
+		)
+	);
+
+	$dir = tsosi_scan_cache_storage_dir();
+	if ( '' === $dir ) {
+		return;
+	}
+	$files = glob( $dir . '/cache-*.json' );
+	if ( ! is_array( $files ) ) {
+		return;
+	}
+	foreach ( $files as $file ) {
+		if ( is_string( $file ) && is_file( $file ) ) {
+			wp_delete_file( $file );
+		}
+	}
 }
 
 /**
@@ -94,7 +128,7 @@ function tsosi_scan_cache_file_path( $basename ) {
 		return '';
 	}
 	$safe = basename( (string) $basename );
-	if ( '' === $safe || ! preg_match( '/^cache-(index|build)-u\d+/', $safe ) ) {
+	if ( '' === $safe || ! preg_match( '/^cache-(index|build)-u\d+|^history-u\d+-/', $safe ) ) {
 		return '';
 	}
 	return $dir . '/' . $safe;
@@ -207,12 +241,48 @@ function tsosi_scan_delete_build_index() {
  * @return void
  */
 function tsosi_content_cache_register_hooks() {
-	add_action( 'save_post', 'tsosi_flush_content_cache' );
-	add_action( 'deleted_post', 'tsosi_flush_content_cache' );
 	add_action( 'activated_plugin', 'tsosi_flush_content_cache' );
 	add_action( 'deactivated_plugin', 'tsosi_flush_content_cache' );
 }
 add_action( 'init', 'tsosi_content_cache_register_hooks' );
+
+/**
+ * Cache status for admin UI.
+ *
+ * @return array{ready:bool,built_at:int,age_text:string,fingerprint?:string}
+ */
+function tsosi_scan_get_cache_status() {
+	$settings = tsosi_get_scan_settings();
+	$post_ids = tsosi_scan_collect_post_ids( $settings );
+	$extras   = tsosi_scan_collect_extra_targets( $settings );
+	$fp       = tsosi_scan_content_fingerprint( $settings, $post_ids, $extras );
+	$cache    = tsosi_scan_get_content_cache( $fp );
+
+	if ( ! is_array( $cache ) || empty( $cache['index'] ) ) {
+		return array(
+			'ready'    => false,
+			'built_at' => 0,
+			'age_text' => '',
+		);
+	}
+
+	$meta     = get_transient( tsosi_content_cache_transient_key() );
+	$built_at = is_array( $meta ) && isset( $meta['built_at'] ) ? absint( $meta['built_at'] ) : 0;
+
+	return array(
+		'ready'       => true,
+		'built_at'    => $built_at,
+		'fingerprint' => $fp,
+		'age_text'    => $built_at > 0 ? human_time_diff( $built_at, time() ) : '',
+	);
+}
+
+/**
+ * @return void
+ */
+function tsosi_scan_rebuild_content_cache() {
+	tsosi_flush_all_content_caches();
+}
 
 /**
  * Latest modified timestamp for scannable posts (cache invalidation signal).
@@ -227,13 +297,28 @@ function tsosi_scan_get_max_post_modified_gmt() {
 		return '';
 	}
 
-	$placeholders = implode( ', ', array_fill( 0, count( $types ), '%s' ) );
-	$sql          = "SELECT MAX(post_modified_gmt) FROM {$wpdb->posts} WHERE post_type IN ({$placeholders})";
+	$max = '';
+	foreach ( $types as $post_type ) {
+		$post_type = sanitize_key( (string) $post_type );
+		if ( '' === $post_type ) {
+			continue;
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$candidate = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT MAX(post_modified_gmt) FROM {$wpdb->posts} WHERE post_type = %s",
+				$post_type
+			)
+		);
+		if ( ! is_string( $candidate ) || '' === $candidate ) {
+			continue;
+		}
+		if ( '' === $max || $candidate > $max ) {
+			$max = $candidate;
+		}
+	}
 
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- fingerprint helper; placeholders built from sanitized post types.
-	$max = $wpdb->get_var( $wpdb->prepare( $sql, ...$types ) );
-
-	return is_string( $max ) ? $max : '';
+	return $max;
 }
 
 /**
@@ -263,32 +348,386 @@ function tsosi_scan_content_fingerprint( $settings, $post_ids, $extras ) {
  * @return array<string,mixed>|null
  */
 function tsosi_scan_get_content_cache( $fingerprint ) {
-	$meta = get_transient( tsosi_content_cache_transient_key() );
-	if ( ! is_array( $meta ) ) {
-		return null;
-	}
-	if ( empty( $meta['fingerprint'] ) || (string) $meta['fingerprint'] !== (string) $fingerprint ) {
-		return null;
+	$fingerprint = (string) $fingerprint;
+	$meta        = get_transient( tsosi_content_cache_transient_key() );
+
+	if ( is_array( $meta ) && ! empty( $meta['fingerprint'] ) && (string) $meta['fingerprint'] === $fingerprint ) {
+		if ( ! empty( $meta['index'] ) && empty( $meta['file'] ) ) {
+			delete_transient( tsosi_content_cache_transient_key() );
+		} elseif ( ! empty( $meta['file'] ) ) {
+			$path  = tsosi_scan_cache_file_path( (string) $meta['file'] );
+			$index = tsosi_scan_cache_read_json_file( $path );
+			if ( is_array( $index ) ) {
+				return array(
+					'fingerprint' => $fingerprint,
+					'index'       => $index,
+				);
+			}
+		}
 	}
 
-	// Drop legacy transients that stored the full index in the database (too large).
-	if ( ! empty( $meta['index'] ) && empty( $meta['file'] ) ) {
-		delete_transient( tsosi_content_cache_transient_key() );
-		return null;
-	}
-	if ( empty( $meta['file'] ) ) {
-		return null;
-	}
-
-	$path  = tsosi_scan_cache_file_path( (string) $meta['file'] );
-	$index = tsosi_scan_cache_read_json_file( $path );
+	$filename = tsosi_scan_cache_index_filename( $fingerprint );
+	$path     = tsosi_scan_cache_file_path( $filename );
+	$index    = tsosi_scan_cache_read_json_file( $path );
 	if ( ! is_array( $index ) ) {
 		return null;
 	}
 
+	$built_at = is_readable( $path ) ? (int) filemtime( $path ) : time();
+	set_transient(
+		tsosi_content_cache_transient_key(),
+		array(
+			'fingerprint' => $fingerprint,
+			'file'        => $filename,
+			'built_at'    => $built_at > 0 ? $built_at : time(),
+		),
+		TSOSI_CONTENT_CACHE_TTL
+	);
+
 	return array(
-		'fingerprint' => (string) $fingerprint,
+		'fingerprint' => $fingerprint,
 		'index'       => $index,
+	);
+}
+
+/**
+ * Build the needle-agnostic site index (posts + widgets/menus/options blobs).
+ *
+ * @param array<string,mixed>|null $settings    Scan settings.
+ * @param int[]|null               $post_ids    Post IDs (collected when null).
+ * @param array<int,array<string,mixed>>|null $extras Extra targets.
+ * @param string|null              $fingerprint Content fingerprint.
+ * @return array{posts:array<int,array<string,mixed>>,extras:array<int,array<string,mixed>>}|null
+ */
+function tsosi_scan_build_content_index( $settings = null, $post_ids = null, $extras = null, $fingerprint = null ) {
+	if ( ! tsosi_scan_content_cache_storage_ready() ) {
+		return null;
+	}
+
+	if ( ! is_array( $settings ) ) {
+		$settings = tsosi_get_scan_settings();
+	}
+	if ( ! is_array( $post_ids ) ) {
+		$post_ids = tsosi_scan_collect_post_ids( $settings );
+	}
+	if ( ! is_array( $extras ) ) {
+		$extras = tsosi_scan_collect_extra_targets( $settings );
+	}
+	if ( null === $fingerprint ) {
+		$fingerprint = tsosi_scan_content_fingerprint( $settings, $post_ids, $extras );
+	}
+
+	$index = array(
+		'posts'  => array(),
+		'extras' => array(),
+	);
+
+	foreach ( $post_ids as $post_id ) {
+		$source = tsosi_scan_extract_post_source( (int) $post_id );
+		if ( is_array( $source ) ) {
+			$index['posts'][] = $source;
+		}
+	}
+
+	foreach ( $extras as $target ) {
+		if ( ! is_array( $target ) ) {
+			continue;
+		}
+		$type = isset( $target['type'] ) ? sanitize_key( (string) $target['type'] ) : '';
+		if ( tsosi_scan_extra_is_needle_dependent( $type ) ) {
+			continue;
+		}
+		$index['extras'] = array_merge( $index['extras'], tsosi_scan_extract_extra_sources( $target ) );
+	}
+
+	tsosi_scan_save_content_cache( (string) $fingerprint, $index );
+
+	return $index;
+}
+
+/**
+ * Return a valid site index when already cached. Does not block on a full rebuild.
+ *
+ * @param array<string,mixed>|null $settings Optional scan settings.
+ * @return array{posts:array<int,array<string,mixed>>,extras:array<int,array<string,mixed>>}|null
+ */
+function tsosi_scan_ensure_content_index( $settings = null ) {
+	if ( ! tsosi_scan_content_cache_storage_ready() ) {
+		return null;
+	}
+
+	if ( ! is_array( $settings ) ) {
+		$settings = tsosi_get_scan_settings();
+	}
+
+	$post_ids    = tsosi_scan_collect_post_ids( $settings );
+	$extras      = tsosi_scan_collect_extra_targets( $settings );
+	$fingerprint = tsosi_scan_content_fingerprint( $settings, $post_ids, $extras );
+	$cache       = tsosi_scan_get_content_cache( $fingerprint );
+
+	if ( is_array( $cache ) && ! empty( $cache['index'] ) && is_array( $cache['index'] ) ) {
+		return $cache['index'];
+	}
+
+	return null;
+}
+
+/**
+ * Per-user transient key for batched index builds.
+ *
+ * @return string
+ */
+function tsosi_index_job_transient_key() {
+	$user_id = get_current_user_id();
+	if ( $user_id <= 0 ) {
+		return TSOSI_TRANSIENT_INDEX_JOB_PREFIX . '0';
+	}
+	return TSOSI_TRANSIENT_INDEX_JOB_PREFIX . $user_id;
+}
+
+/**
+ * @return void
+ */
+function tsosi_index_job_cancel() {
+	delete_transient( tsosi_index_job_transient_key() );
+}
+
+/**
+ * WP_Error when the site index has not been built yet (AJAX should start a batched build).
+ *
+ * @return WP_Error
+ */
+function tsosi_scan_need_index_error() {
+	return new WP_Error(
+		'tsosi_need_index',
+		tsosi_ui_triple_text(
+			'Site index is not ready yet. Building it in the background…',
+			'El índice del sitio aún no está listo. Creándolo en segundo plano…',
+			'L\'índex del lloc encara no està a punt. Creant-lo en segon pla…'
+		)
+	);
+}
+
+/**
+ * WP_Error when uploads storage cannot hold the index.
+ *
+ * @return WP_Error
+ */
+function tsosi_scan_index_unavailable_error() {
+	return new WP_Error(
+		'tsosi_index_unavailable',
+		tsosi_ui_triple_text(
+			'Could not build the site index. Check that wp-content/uploads is writable for this plugin.',
+			'No se pudo crear el índice del sitio. Comprueba que wp-content/uploads permite escritura para este plugin.',
+			'No s\'ha pogut crear l\'índex del lloc. Comprova que wp-content/uploads permet escriptura per a aquest plugin.'
+		)
+	);
+}
+
+/**
+ * Start a batched site-index build (does not match needles).
+ *
+ * @param bool $force Rebuild even if a matching cache exists.
+ * @return array<string,mixed>|WP_Error
+ */
+function tsosi_index_job_start( $force = false ) {
+	if ( ! tsosi_scan_content_cache_storage_ready() ) {
+		return tsosi_scan_index_unavailable_error();
+	}
+
+	$scan_job = get_transient( tsosi_scan_job_transient_key() );
+	if ( is_array( $scan_job ) ) {
+		return new WP_Error(
+			'tsosi_busy',
+			tsosi_ui_triple_text(
+				'A scan is already running. Wait for it to finish or cancel it first.',
+				'Ya hay un escaneo en curso. Espera a que termine o cancélalo primero.',
+				'Ja hi ha un escaneig en curs. Espera que acabi o cancel·la\'l primer.'
+			)
+		);
+	}
+
+	$settings    = tsosi_get_scan_settings();
+	$post_ids    = tsosi_scan_collect_post_ids( $settings );
+	$extras      = tsosi_scan_collect_extra_targets( $settings );
+	$fingerprint = tsosi_scan_content_fingerprint( $settings, $post_ids, $extras );
+
+	if ( ! $force ) {
+		$cache = tsosi_scan_get_content_cache( $fingerprint );
+		if ( is_array( $cache ) && ! empty( $cache['index'] ) ) {
+			return array(
+				'done'          => true,
+				'ready'         => true,
+				'cached'        => true,
+				'progress'      => 100,
+				'total_steps'   => count( $post_ids ) + count( $extras ),
+				'total_posts'   => count( $post_ids ),
+			);
+		}
+	}
+
+	tsosi_index_job_cancel();
+	tsosi_scan_delete_build_index();
+	tsosi_scan_save_build_index(
+		array(
+			'posts'  => array(),
+			'extras' => array(),
+		)
+	);
+
+	$job = array(
+		'token'       => wp_generate_password( 12, false, false ),
+		'post_ids'    => $post_ids,
+		'post_offset' => 0,
+		'extras'      => $extras,
+		'extra_index' => 0,
+		'fingerprint' => $fingerprint,
+		'started_at'  => time(),
+	);
+	set_transient( tsosi_index_job_transient_key(), $job, HOUR_IN_SECONDS );
+
+	$total = count( $post_ids ) + count( $extras );
+	if ( 0 === $total ) {
+		tsosi_scan_save_content_cache(
+			$fingerprint,
+			array(
+				'posts'  => array(),
+				'extras' => array(),
+			)
+		);
+		tsosi_scan_delete_build_index();
+		tsosi_index_job_cancel();
+		return array(
+			'done'        => true,
+			'ready'       => true,
+			'cached'      => false,
+			'progress'    => 100,
+			'total_steps' => 0,
+			'total_posts' => 0,
+		);
+	}
+
+	return array(
+		'done'          => false,
+		'ready'         => false,
+		'cached'        => false,
+		'progress'      => 0,
+		'total_steps'   => $total,
+		'total_posts'   => count( $post_ids ),
+	);
+}
+
+/**
+ * Process one batch of the site-index job.
+ *
+ * @return array<string,mixed>|WP_Error
+ */
+function tsosi_index_job_step() {
+	$job = get_transient( tsosi_index_job_transient_key() );
+	if ( ! is_array( $job ) ) {
+		$status = tsosi_scan_get_cache_status();
+		if ( ! empty( $status['ready'] ) ) {
+			return array(
+				'done'     => true,
+				'ready'    => true,
+				'progress' => 100,
+			);
+		}
+		return new WP_Error(
+			'tsosi_no_index_job',
+			tsosi_ui_triple_text(
+				'No index build in progress.',
+				'No hay una creación de índice en curso.',
+				'No hi ha una creació d\'índex en curs.'
+			)
+		);
+	}
+
+	$post_ids    = isset( $job['post_ids'] ) && is_array( $job['post_ids'] ) ? $job['post_ids'] : array();
+	$offset      = isset( $job['post_offset'] ) ? (int) $job['post_offset'] : 0;
+	$extras      = isset( $job['extras'] ) && is_array( $job['extras'] ) ? $job['extras'] : array();
+	$extra_index = isset( $job['extra_index'] ) ? (int) $job['extra_index'] : 0;
+	$index       = tsosi_scan_load_build_index();
+
+	$batch = array_slice( $post_ids, $offset, TSOSI_SCAN_BATCH_SIZE );
+	foreach ( $batch as $post_id ) {
+		$source = tsosi_scan_extract_post_source( (int) $post_id );
+		if ( is_array( $source ) ) {
+			$index['posts'][] = $source;
+		}
+		++$offset;
+	}
+
+	if ( ! tsosi_scan_save_build_index( $index ) ) {
+		tsosi_index_job_cancel();
+		tsosi_scan_delete_build_index();
+		return tsosi_scan_index_unavailable_error();
+	}
+
+	$fresh = get_transient( tsosi_index_job_transient_key() );
+	if ( ! is_array( $fresh ) || (string) ( $fresh['token'] ?? '' ) !== (string) ( $job['token'] ?? '' ) ) {
+		return array(
+			'done'     => false,
+			'aborted'  => true,
+			'progress' => 0,
+		);
+	}
+
+	$job['post_offset'] = $offset;
+	$done_posts         = $offset >= count( $post_ids );
+
+	if ( $done_posts && $extra_index < count( $extras ) ) {
+		$target = $extras[ $extra_index ];
+		$type   = is_array( $target ) && isset( $target['type'] ) ? sanitize_key( (string) $target['type'] ) : '';
+		if ( tsosi_scan_extra_is_needle_dependent( $type ) ) {
+			++$extra_index;
+		} else {
+			$index['extras'] = array_merge( $index['extras'], tsosi_scan_extract_extra_sources( $target ) );
+			tsosi_scan_save_build_index( $index );
+			++$extra_index;
+		}
+		$job['extra_index'] = $extra_index;
+	}
+
+	$total_steps = count( $post_ids ) + count( $extras );
+	$current     = min( $offset, count( $post_ids ) ) + min( $extra_index, count( $extras ) );
+	$complete    = $done_posts && $extra_index >= count( $extras );
+
+	$still = get_transient( tsosi_index_job_transient_key() );
+	if ( ! is_array( $still ) || (string) ( $still['token'] ?? '' ) !== (string) ( $job['token'] ?? '' ) ) {
+		return array(
+			'done'     => false,
+			'aborted'  => true,
+			'progress' => 0,
+		);
+	}
+
+	if ( $complete ) {
+		$fingerprint = isset( $job['fingerprint'] ) ? (string) $job['fingerprint'] : '';
+		if ( '' !== $fingerprint ) {
+			tsosi_scan_save_content_cache( $fingerprint, $index );
+		}
+		tsosi_scan_delete_build_index();
+		tsosi_index_job_cancel();
+		return array(
+			'done'            => true,
+			'ready'           => true,
+			'progress'        => 100,
+			'processed_steps' => $total_steps,
+			'total_steps'     => $total_steps,
+			'total_posts'     => count( $post_ids ),
+		);
+	}
+
+	set_transient( tsosi_index_job_transient_key(), $job, HOUR_IN_SECONDS );
+
+	return array(
+		'done'            => false,
+		'ready'           => false,
+		'progress'        => $total_steps > 0 ? min( 100, (int) round( ( $current / $total_steps ) * 100 ) ) : 100,
+		'processed_steps' => $current,
+		'total_steps'     => $total_steps,
+		'total_posts'     => count( $post_ids ),
 	);
 }
 
@@ -334,14 +773,7 @@ function tsosi_scan_extract_post_source( $post_id ) {
 		return null;
 	}
 
-	$builder_keys  = array( '_elementor_data', '_fl_builder_data', '_et_pb_old_content', '_wpb_shortcodes_custom_css' );
-	$builder_blobs = array();
-	foreach ( $builder_keys as $meta_key ) {
-		$value = get_post_meta( $post_id, $meta_key, true );
-		if ( is_string( $value ) && '' !== $value && strlen( $value ) <= 500000 ) {
-			$builder_blobs[] = $value;
-		}
-	}
+	$builder_blobs = tsosi_scan_collect_builder_blobs( $post_id );
 
 	$custom_keys = get_post_custom_keys( $post_id );
 	$meta_keys   = array();
@@ -503,6 +935,7 @@ function tsosi_scan_extract_autoload_option_sources() {
 		'user_roles',
 		'active_plugins',
 		'recently_activated',
+		'rewrite_rules',
 	);
 	$skip_prefixes = array(
 		'_transient_',
@@ -584,6 +1017,10 @@ function tsosi_scan_extract_extra_sources( $target ) {
 		$menu = tsosi_scan_extract_menu_source( $target );
 		return $menu ? array( $menu ) : array();
 	}
+	if ( 'theme_mods' === $type ) {
+		// Needle-dependent: scanned live via tsosi_scan_theme_mods(), not stored in the content index.
+		return array();
+	}
 
 	return array();
 }
@@ -615,14 +1052,30 @@ function tsosi_scan_match_blob_sources( $rows, $needles ) {
 					$needles,
 					isset( $row['label'] ) ? (string) $row['label'] : '',
 					$ctx,
-					isset( $row['edit_url'] ) ? (string) $row['edit_url'] : admin_url( 'widgets.php' ),
+					isset( $row['edit_url'] ) ? (string) $row['edit_url'] : tsosi_scan_widgets_admin_url(),
 					'widget'
 				)
 			);
 			continue;
 		}
 
-		$ctx = tsosi_ui_triple_text( 'wp_options', 'wp_options', 'wp_options' );
+		if ( 'theme_mod' === $kind ) {
+			$ctx = tsosi_ui_triple_text( 'Theme mods', 'Ajustes del tema', 'Ajustos del tema' );
+			$found = array_merge(
+				$found,
+				tsosi_scan_blob_rows(
+					$row['blob'],
+					$needles,
+					isset( $row['label'] ) ? (string) $row['label'] : '',
+					$ctx,
+					isset( $row['edit_url'] ) ? (string) $row['edit_url'] : admin_url( 'customize.php' ),
+					'theme_mod'
+				)
+			);
+			continue;
+		}
+
+		$ctx     = tsosi_ui_triple_text( 'wp_options', 'wp_options', 'wp_options' );
 		$found = array_merge(
 			$found,
 			tsosi_scan_blob_rows(
@@ -713,10 +1166,31 @@ function tsosi_scan_match_cached_index( $index, $needles ) {
 		if ( 'widget' === $kind || 'option' === $kind ) {
 			$results = array_merge( $results, tsosi_scan_match_blob_sources( array( $source ), $needles ) );
 		}
+		// theme_mod blobs are ignored from the index: scanned live via tsosi_scan_theme_mods().
 	}
 
-	if ( ! empty( $needles['option_prefixes'] ) ) {
+	$settings = tsosi_get_scan_settings();
+	if ( ! empty( $settings['include_widgets'] ) && ! empty( $needles['option_prefixes'] ) ) {
+		$widget_ctx = tsosi_ui_triple_text( 'Widget option', 'Opción de widget', 'Opció de widget' );
+		$results    = array_merge(
+			$results,
+			tsosi_scan_active_widget_instances( $needles, $widget_ctx, tsosi_scan_widgets_admin_url() )
+		);
+	}
+	if ( ! empty( $settings['include_non_autoload_options'] ) && ! empty( $needles['option_prefixes'] ) ) {
 		$results = array_merge( $results, tsosi_scan_non_autoload_options( $needles ) );
+	}
+	if ( ! empty( $settings['include_theme_mods'] ) ) {
+		$results = array_merge( $results, tsosi_scan_theme_mods( $needles ) );
+	}
+	if ( ! empty( $settings['include_user_meta'] ) ) {
+		$results = array_merge( $results, tsosi_scan_user_meta( $needles ) );
+	}
+	if ( ! empty( $settings['include_term_meta'] ) ) {
+		$results = array_merge( $results, tsosi_scan_term_meta( $needles ) );
+	}
+	if ( ! empty( $settings['include_comment_meta'] ) ) {
+		$results = array_merge( $results, tsosi_scan_comment_meta( $needles ) );
 	}
 
 	return tsosi_scan_dedupe_results( $results );
@@ -730,12 +1204,15 @@ function tsosi_scan_match_cached_index( $index, $needles ) {
  * @param int                 $post_count Posts scanned/indexed.
  * @param int                 $extra_count Extras scanned/indexed.
  * @param bool                $from_cache Whether index came from cache.
+ * @param array<string,mixed> $query      Original scan query (for history).
  * @return array<string,mixed>
  */
-function tsosi_scan_build_complete_response( $needles, $results, $post_count, $extra_count, $from_cache = false ) {
+function tsosi_scan_build_complete_response( $needles, $results, $post_count, $extra_count, $from_cache = false, $query = array() ) {
+	$results     = tsosi_scan_filter_ignored_results(
+		tsosi_scan_filter_cross_plugin_false_positives( $results, is_array( $query ) ? $query : array() )
+	);
 	$total_steps = $post_count + $extra_count;
-
-	return array(
+	$response    = array(
 		'done'            => true,
 		'cached'          => $from_cache,
 		'progress'        => 100,
@@ -747,5 +1224,31 @@ function tsosi_scan_build_complete_response( $needles, $results, $post_count, $e
 		'result_count'    => count( $results ),
 		'needles'         => $needles,
 		'needles_empty'   => tsosi_scan_needles_are_empty( $needles ),
+		'risk'            => tsosi_scan_assess_risk( $results ),
+		'cleaner_url'     => tsosi_get_options_cleaner_url_from_needles(
+			$needles,
+			isset( $query['plugin_file'] ) ? (string) $query['plugin_file'] : ''
+		),
+		'cleaner_available' => tsosi_options_cleaner_is_available(),
+		'plugin_file'     => isset( $query['plugin_file'] ) ? (string) $query['plugin_file'] : '',
 	);
+
+	if ( is_array( $query ) && ! empty( $query ) ) {
+		$history_id = tsosi_scan_history_save(
+			$query,
+			$results,
+			array(
+				'total_posts'   => $post_count,
+				'result_count'  => count( $results ),
+				'needles'       => $needles,
+				'needles_empty' => $response['needles_empty'],
+				'cached'        => $from_cache,
+			)
+		);
+		if ( '' !== $history_id ) {
+			$response['history_id'] = $history_id;
+		}
+	}
+
+	return $response;
 }

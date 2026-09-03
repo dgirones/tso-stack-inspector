@@ -43,6 +43,9 @@ function tsosi_get_scannable_post_types() {
  */
 function tsosi_scan_job_start( $query ) {
 	$query    = is_array( $query ) ? $query : array();
+	if ( function_exists( 'tsosi_index_job_cancel' ) ) {
+		tsosi_index_job_cancel();
+	}
 	$settings = tsosi_get_scan_settings();
 	$needles  = tsosi_scan_resolve_needles( $query );
 
@@ -58,7 +61,7 @@ function tsosi_scan_job_start( $query ) {
 	if ( $cache ) {
 		$index   = isset( $cache['index'] ) && is_array( $cache['index'] ) ? $cache['index'] : array();
 		$results = tsosi_scan_match_cached_index( $index, $needles );
-		return tsosi_scan_build_complete_response( $needles, $results, count( $post_ids ), count( $extras ), true );
+		return tsosi_scan_build_complete_response( $needles, $results, count( $post_ids ), count( $extras ), true, $query );
 	}
 
 	$job = array(
@@ -193,7 +196,58 @@ function tsosi_scan_collect_extra_targets( $settings ) {
 			}
 		}
 	}
+	if ( ! empty( $settings['include_theme_mods'] ) ) {
+		$targets[] = array(
+			'type' => 'theme_mods',
+		);
+	}
+	if ( ! empty( $settings['include_user_meta'] ) ) {
+		$targets[] = array(
+			'type' => 'user_meta',
+		);
+	}
+	if ( ! empty( $settings['include_term_meta'] ) ) {
+		$targets[] = array(
+			'type' => 'term_meta',
+		);
+	}
+	if ( ! empty( $settings['include_comment_meta'] ) ) {
+		$targets[] = array(
+			'type' => 'comment_meta',
+		);
+	}
 	return $targets;
+}
+
+/**
+ * Extra targets resolved at match time (depend on needles, not cached in index).
+ *
+ * @param string $type Target type.
+ * @return bool
+ */
+function tsosi_scan_extra_is_needle_dependent( $type ) {
+	return in_array(
+		sanitize_key( (string) $type ),
+		array(
+			'non_autoload_options',
+			'theme_mods',
+			'user_meta',
+			'term_meta',
+			'comment_meta',
+		),
+		true
+	);
+}
+
+/**
+ * Cancel the current user's in-progress scan.
+ *
+ * @return void
+ */
+function tsosi_scan_job_cancel() {
+	delete_transient( tsosi_scan_job_transient_key() );
+	tsosi_scan_delete_build_index();
+	tsosi_background_unregister_job( get_current_user_id() );
 }
 
 /**
@@ -250,8 +304,8 @@ function tsosi_scan_job_step() {
 
 	if ( $done_posts && $extra_index < count( $extras ) ) {
 		$target = $extras[ $extra_index ];
-		if ( is_array( $target ) && isset( $target['type'] ) && 'non_autoload_options' === sanitize_key( (string) $target['type'] ) ) {
-			// Needle-dependent; matched only after the index is built.
+		$type   = is_array( $target ) && isset( $target['type'] ) ? sanitize_key( (string) $target['type'] ) : '';
+		if ( tsosi_scan_extra_is_needle_dependent( $type ) ) {
 			++$extra_index;
 		} else {
 			$index['extras'] = array_merge( $index['extras'], tsosi_scan_extract_extra_sources( $target ) );
@@ -273,7 +327,7 @@ function tsosi_scan_job_step() {
 		tsosi_scan_delete_build_index();
 		delete_transient( tsosi_scan_job_transient_key() );
 
-		return tsosi_scan_build_complete_response( $needles, $results, count( $post_ids ), count( $extras ), false );
+		return tsosi_scan_build_complete_response( $needles, $results, count( $post_ids ), count( $extras ), false, $query );
 	}
 
 	set_transient( tsosi_scan_job_transient_key(), $job, HOUR_IN_SECONDS );
@@ -339,7 +393,7 @@ function tsosi_scan_job_step_legacy( $job ) {
 		$results = tsosi_scan_dedupe_results( $results );
 		delete_transient( tsosi_scan_job_transient_key() );
 
-		return tsosi_scan_build_complete_response( $needles, $results, count( $post_ids ), count( $extras ), false );
+		return tsosi_scan_build_complete_response( $needles, $results, count( $post_ids ), count( $extras ), false, $query );
 	}
 
 	set_transient( tsosi_scan_job_transient_key(), $job, HOUR_IN_SECONDS );
@@ -360,6 +414,261 @@ function tsosi_scan_job_step_legacy( $job ) {
 		'needles'         => $needles,
 		'needles_empty'   => tsosi_scan_needles_are_empty( $needles ),
 	);
+}
+
+/**
+ * Whether the plugin file is this inspector (Stack Inspector).
+ *
+ * @param string $plugin_file Plugin basename.
+ * @return bool
+ */
+function tsosi_is_stack_inspector_plugin_file( $plugin_file ) {
+	$plugin_file = tsosi_sanitize_plugin_file( $plugin_file );
+	if ( '' === $plugin_file || ! defined( 'TSOSI_FILE' ) ) {
+		return false;
+	}
+	return plugin_basename( TSOSI_FILE ) === $plugin_file;
+}
+
+/**
+ * Storage keys owned by Stack Inspector itself (not the scanned target plugin).
+ *
+ * @param string $key Option or meta key.
+ * @return bool
+ */
+function tsosi_scan_is_inspector_owned_storage_key( $key ) {
+	$key = sanitize_key( (string) $key );
+	if ( '' === $key ) {
+		return false;
+	}
+	$owned = array(
+		'tso_stack_inspector',
+	);
+	foreach ( $owned as $prefix ) {
+		if ( $key === $prefix ) {
+			return true;
+		}
+		if ( 0 === strpos( $key, $prefix . '_' ) ) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * Drop short prefixes subsumed by longer ones (e.g. tso when tso_swiss exists).
+ *
+ * @param string[] $prefixes Prefix list.
+ * @return string[]
+ */
+function tsosi_refine_prefix_list( $prefixes ) {
+	$prefixes = array_values(
+		array_unique(
+			array_filter(
+				array_map( 'sanitize_key', (array) $prefixes )
+			)
+		)
+	);
+	if ( count( $prefixes ) <= 1 ) {
+		return $prefixes;
+	}
+
+	usort(
+		$prefixes,
+		function ( $a, $b ) {
+			return strlen( $b ) - strlen( $a );
+		}
+	);
+
+	$keep = array();
+	foreach ( $prefixes as $prefix ) {
+		if ( strlen( $prefix ) < 3 ) {
+			continue;
+		}
+		$redundant = false;
+		foreach ( $keep as $longer ) {
+			if ( $prefix === $longer ) {
+				$redundant = true;
+				break;
+			}
+			if ( 0 !== strpos( $longer, $prefix ) || strlen( $longer ) <= strlen( $prefix ) ) {
+				continue;
+			}
+			$sep = $longer[ strlen( $prefix ) ];
+			if ( '_' === $sep || '-' === $sep ) {
+				$redundant = true;
+				break;
+			}
+			// Drop ambiguous short stems (e.g. tso) when tsosk / tso_swiss exist.
+			if ( strlen( $prefix ) <= 3 ) {
+				$redundant = true;
+				break;
+			}
+		}
+		if ( ! $redundant ) {
+			$keep[] = $prefix;
+		}
+	}
+
+	sort( $keep );
+	return $keep;
+}
+
+/**
+ * Storage prefixes owned by other installed plugins (exclude when scanning a target plugin).
+ *
+ * @param string $target_plugin_file Plugin being scanned.
+ * @return string[]
+ */
+function tsosi_scan_get_peer_plugin_storage_prefixes( $target_plugin_file ) {
+	static $cache = array();
+
+	$target_plugin_file = tsosi_sanitize_plugin_file( $target_plugin_file );
+	if ( '' === $target_plugin_file ) {
+		return array();
+	}
+	if ( isset( $cache[ $target_plugin_file ] ) ) {
+		return $cache[ $target_plugin_file ];
+	}
+
+	$prefixes      = array();
+	$target_folder = sanitize_key( str_replace( '-', '_', tsosi_get_plugin_folder_raw( $target_plugin_file ) ) );
+	$profiles      = tsosi_get_all_plugin_profiles();
+	$plugins       = tsosi_get_installed_plugins();
+
+	foreach ( $plugins as $file => $header ) {
+		$file = tsosi_sanitize_plugin_file( (string) $file );
+		if ( '' === $file || $file === $target_plugin_file ) {
+			continue;
+		}
+		$folder = sanitize_key( str_replace( '-', '_', tsosi_get_plugin_folder_raw( $file ) ) );
+		if ( '' !== $folder && $folder !== $target_folder ) {
+			$prefixes[] = $folder;
+		}
+		$profile = isset( $profiles[ $file ] ) && is_array( $profiles[ $file ] )
+			? $profiles[ $file ]
+			: tsosi_build_plugin_profile( $file );
+		foreach ( array( 'meta_prefixes', 'option_prefixes' ) as $field ) {
+			if ( empty( $profile[ $field ] ) || ! is_array( $profile[ $field ] ) ) {
+				continue;
+			}
+			foreach ( $profile[ $field ] as $prefix ) {
+				$prefix = sanitize_key( (string) $prefix );
+				if ( strlen( $prefix ) >= 5 ) {
+					$prefixes[] = $prefix;
+				}
+			}
+		}
+	}
+
+	if ( ! tsosi_is_stack_inspector_plugin_file( $target_plugin_file ) ) {
+		$prefixes[] = 'tso_stack_inspector';
+	}
+
+	$cache[ $target_plugin_file ] = tsosi_refine_prefix_list( array_values( array_unique( array_filter( $prefixes ) ) ) );
+	return $cache[ $target_plugin_file ];
+}
+
+/**
+ * Whether a storage key belongs to another installed plugin, not the scan target.
+ *
+ * @param string $key                Option or meta key.
+ * @param string $target_plugin_file Plugin being scanned.
+ * @return bool
+ */
+function tsosi_scan_is_peer_plugin_storage_key( $key, $target_plugin_file ) {
+	$key = sanitize_key( (string) $key );
+	if ( '' === $key ) {
+		return false;
+	}
+	foreach ( tsosi_scan_get_peer_plugin_storage_prefixes( $target_plugin_file ) as $prefix ) {
+		if ( tsosi_scan_meta_key_matches_prefix( $key, $prefix ) ) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * Remove false positives: keys owned by other plugins or Stack Inspector when scanning elsewhere.
+ *
+ * @param array<int,array<string,mixed>> $results Scan rows.
+ * @param array<string,mixed>            $query   Scan query.
+ * @return array<int,array<string,mixed>>
+ */
+function tsosi_scan_filter_cross_plugin_false_positives( $results, $query ) {
+	if ( ! is_array( $results ) || empty( $results ) ) {
+		return is_array( $results ) ? $results : array();
+	}
+
+	$target_plugin_file = '';
+	if ( is_array( $query ) && isset( $query['mode'] ) && 'plugin' === sanitize_key( (string) $query['mode'] ) ) {
+		$target_plugin_file = isset( $query['plugin_file'] ) ? tsosi_sanitize_plugin_file( (string) $query['plugin_file'] ) : '';
+	}
+
+	return array_values(
+		array_filter(
+			$results,
+			function ( $row ) use ( $target_plugin_file ) {
+				if ( ! is_array( $row ) ) {
+					return false;
+				}
+				$match_type = isset( $row['match_type'] ) ? sanitize_key( (string) $row['match_type'] ) : '';
+				if ( 'meta' !== $match_type && 'option' !== $match_type ) {
+					return true;
+				}
+				$key = isset( $row['match_value'] ) ? sanitize_key( (string) $row['match_value'] ) : '';
+				if ( '' === $key ) {
+					return true;
+				}
+				if ( tsosi_scan_is_inspector_owned_storage_key( $key ) ) {
+					if ( '' !== $target_plugin_file && tsosi_is_stack_inspector_plugin_file( $target_plugin_file ) ) {
+						return true;
+					}
+					return false;
+				}
+				if ( '' !== $target_plugin_file && tsosi_scan_is_peer_plugin_storage_key( $key, $target_plugin_file ) ) {
+					return false;
+				}
+				return true;
+			}
+		)
+	);
+}
+
+/**
+ * Drop scan rows whose match value is on the Settings ignore list.
+ *
+ * @param array<int,array<string,mixed>> $results Scan rows.
+ * @return array<int,array<string,mixed>>
+ */
+function tsosi_scan_filter_ignored_results( $results ) {
+	if ( ! is_array( $results ) || empty( $results ) ) {
+		return is_array( $results ) ? $results : array();
+	}
+
+	return array_values(
+		array_filter(
+			$results,
+			function ( $row ) {
+				if ( ! is_array( $row ) ) {
+					return false;
+				}
+				$value = isset( $row['match_value'] ) ? (string) $row['match_value'] : '';
+				return ! tsosi_scan_value_is_ignored( $value );
+			}
+		)
+	);
+}
+
+/**
+ * @deprecated 1.4.0 Use tsosi_scan_filter_cross_plugin_false_positives().
+ * @param array<int,array<string,mixed>> $results Scan rows.
+ * @param array<string,mixed>            $query   Scan query.
+ * @return array<int,array<string,mixed>>
+ */
+function tsosi_scan_filter_inspector_false_positives( $results, $query ) {
+	return tsosi_scan_filter_cross_plugin_false_positives( $results, $query );
 }
 
 /**
@@ -404,14 +713,39 @@ function tsosi_scan_resolve_needles( $query ) {
 				}
 			}
 		}
+	} elseif ( 'theme' === $mode ) {
+		$stylesheet = isset( $query['theme'] ) ? sanitize_text_field( (string) $query['theme'] ) : '';
+		$profile    = tsosi_build_theme_profile( $stylesheet );
+		$shortcodes      = isset( $profile['shortcodes'] ) ? (array) $profile['shortcodes'] : array();
+		$blocks          = isset( $profile['blocks'] ) ? (array) $profile['blocks'] : array();
+		$meta_prefixes   = isset( $profile['meta_prefixes'] ) ? (array) $profile['meta_prefixes'] : array();
+		$option_prefixes = isset( $profile['option_prefixes'] ) ? (array) $profile['option_prefixes'] : array();
 	}
 
 	return array(
 		'shortcodes'      => array_values( array_unique( array_filter( $shortcodes ) ) ),
 		'blocks'          => array_values( array_unique( array_filter( $blocks ) ) ),
 		'meta_keys'       => array_values( array_unique( array_filter( $meta_keys ) ) ),
-		'meta_prefixes'   => array_values( array_unique( array_filter( $meta_prefixes ) ) ),
-		'option_prefixes' => array_values( array_unique( array_filter( $option_prefixes ) ) ),
+		'meta_prefixes'   => tsosi_refine_prefix_list(
+			array_values(
+				array_filter(
+					$meta_prefixes,
+					function ( $prefix ) {
+						return ! tsosi_is_runtime_analytics_storage_key( (string) $prefix );
+					}
+				)
+			)
+		),
+		'option_prefixes' => tsosi_refine_prefix_list(
+			array_values(
+				array_filter(
+					$option_prefixes,
+					function ( $prefix ) {
+						return ! in_array( sanitize_key( (string) $prefix ), tsosi_get_core_wp_option_key_blocklist(), true );
+					}
+				)
+			)
+		),
 	);
 }
 
@@ -643,6 +977,9 @@ function tsosi_scan_post_meta( $post_id, $needles, $post ) {
 		}
 		if ( $match ) {
 			$matched_keys[] = $meta_key;
+			if ( tsosi_is_runtime_analytics_storage_key( $meta_key ) ) {
+				continue;
+			}
 			$found[]        = tsosi_scan_make_result(
 				$post,
 				'meta',
@@ -664,26 +1001,15 @@ function tsosi_scan_post_meta( $post_id, $needles, $post ) {
  * @return array<int,array<string,mixed>>
  */
 function tsosi_scan_post_builder_meta( $post_id, $needles, $post ) {
-	$builder_keys = array( '_elementor_data', '_fl_builder_data', '_et_pb_old_content', '_wpb_shortcodes_custom_css' );
-	$found        = array();
+	$found = array();
+	$tags  = isset( $needles['shortcodes'] ) && is_array( $needles['shortcodes'] ) ? $needles['shortcodes'] : array();
+	$blocks = isset( $needles['blocks'] ) && is_array( $needles['blocks'] ) ? $needles['blocks'] : array();
 
-	foreach ( $builder_keys as $meta_key ) {
-		$value = get_post_meta( $post_id, $meta_key, true );
-		if ( ! is_string( $value ) || '' === $value ) {
-			continue;
-		}
+	foreach ( tsosi_scan_collect_builder_blobs( $post_id ) as $value ) {
 		$found = array_merge(
 			$found,
-			tsosi_scan_content_for_shortcodes(
-				$value,
-				isset( $needles['shortcodes'] ) && is_array( $needles['shortcodes'] ) ? $needles['shortcodes'] : array(),
-				$post
-			),
-			tsosi_scan_content_for_blocks(
-				$value,
-				isset( $needles['blocks'] ) && is_array( $needles['blocks'] ) ? $needles['blocks'] : array(),
-				$post
-			)
+			tsosi_scan_content_for_shortcodes( $value, $tags, $post ),
+			tsosi_scan_content_for_blocks( $value, $blocks, $post )
 		);
 	}
 
@@ -710,6 +1036,18 @@ function tsosi_scan_extra_target( $target, $needles ) {
 	}
 	if ( 'menu' === $type ) {
 		return tsosi_scan_menu( $target, $needles );
+	}
+	if ( 'user_meta' === $type ) {
+		return tsosi_scan_user_meta( $needles );
+	}
+	if ( 'term_meta' === $type ) {
+		return tsosi_scan_term_meta( $needles );
+	}
+	if ( 'comment_meta' === $type ) {
+		return tsosi_scan_comment_meta( $needles );
+	}
+	if ( 'theme_mods' === $type ) {
+		return tsosi_scan_theme_mods( $needles );
 	}
 	return array();
 }
@@ -741,18 +1079,23 @@ function tsosi_scan_value_to_blob( $value ) {
  */
 function tsosi_scan_blob_rows( $blob, $needles, $label, $context, $edit_url, $source_type ) {
 	$found = array();
+	$label = (string) $label;
+
+	$found = array_merge( $found, tsosi_scan_rows_for_option_name( $label, $needles, $context, $edit_url, $source_type ) );
+
 	if ( ! is_string( $blob ) || '' === $blob ) {
 		return $found;
 	}
 
 	$shortcodes = isset( $needles['shortcodes'] ) && is_array( $needles['shortcodes'] ) ? $needles['shortcodes'] : array();
 	$blocks     = isset( $needles['blocks'] ) && is_array( $needles['blocks'] ) ? $needles['blocks'] : array();
+	$display    = tsosi_scan_format_widget_result_label( $label, $source_type );
 
 	foreach ( tsosi_scan_blob_for_shortcodes( $blob, $shortcodes ) as $tag ) {
 		$found[] = array(
 			'source_type'  => $source_type,
 			'object_id'    => 0,
-			'object_label' => $label,
+			'object_label' => $display,
 			'match_type'   => 'shortcode',
 			'match_value'  => $tag,
 			'context'      => $context,
@@ -764,7 +1107,7 @@ function tsosi_scan_blob_rows( $blob, $needles, $label, $context, $edit_url, $so
 		$found[] = array(
 			'source_type'  => $source_type,
 			'object_id'    => 0,
-			'object_label' => $label,
+			'object_label' => $display,
 			'match_type'   => 'block',
 			'match_value'  => $block,
 			'context'      => $context,
@@ -780,16 +1123,17 @@ function tsosi_scan_blob_rows( $blob, $needles, $label, $context, $edit_url, $so
  * @return array<int,array<string,mixed>>
  */
 function tsosi_scan_widgets( $needles ) {
-	$found   = array();
-	$options = wp_load_alloptions();
-	$ctx     = tsosi_ui_triple_text( 'Widget option', 'Opción de widget', 'Opció de widget' );
+	$found       = array();
+	$options     = wp_load_alloptions();
+	$ctx         = tsosi_ui_triple_text( 'Widget option', 'Opción de widget', 'Opció de widget' );
+	$widgets_url = tsosi_scan_widgets_admin_url();
 
 	foreach ( $options as $option_name => $value ) {
 		$name = (string) $option_name;
-		if ( 0 !== strpos( $name, 'widget_' ) && 'sidebars_widgets' !== $name ) {
+		if ( 0 !== strpos( $name, 'widget_' ) || 'sidebars_widgets' === $name ) {
 			continue;
 		}
-		$blob = tsosi_scan_value_to_blob( $value );
+		$blob  = tsosi_scan_value_to_blob( $value );
 		$found = array_merge(
 			$found,
 			tsosi_scan_blob_rows(
@@ -797,13 +1141,15 @@ function tsosi_scan_widgets( $needles ) {
 				$needles,
 				sanitize_text_field( $name ),
 				$ctx,
-				admin_url( 'widgets.php' ),
+				$widgets_url,
 				'widget'
 			)
 		);
 	}
 
-	return $found;
+	$found = array_merge( $found, tsosi_scan_active_widget_instances( $needles, $ctx, $widgets_url ) );
+
+	return tsosi_scan_dedupe_results( $found );
 }
 
 /**
@@ -829,6 +1175,7 @@ function tsosi_scan_options( $needles ) {
 		'user_roles',
 		'active_plugins',
 		'recently_activated',
+		'rewrite_rules',
 	);
 	$skip_prefixes = array(
 		'_transient_',
@@ -854,6 +1201,10 @@ function tsosi_scan_options( $needles ) {
 
 		$found = array_merge(
 			$found,
+			tsosi_scan_rows_for_option_name( sanitize_text_field( $name ), $needles, $ctx, '', 'option' )
+		);
+		$found = array_merge(
+			$found,
 			tsosi_scan_blob_rows(
 				$blob,
 				$needles,
@@ -866,6 +1217,238 @@ function tsosi_scan_options( $needles ) {
 	}
 
 	return $found;
+}
+
+/**
+ * Admin URL for editing widgets (classic or block editor screen).
+ *
+ * @return string
+ */
+function tsosi_scan_widgets_admin_url() {
+	if ( function_exists( 'wp_use_widgets_block_editor' ) && wp_use_widgets_block_editor() ) {
+		return admin_url( 'widgets.php' );
+	}
+	return admin_url( 'widgets.php' );
+}
+
+/**
+ * Map widget instance IDs to sidebar IDs.
+ *
+ * @return array<string,string>
+ */
+function tsosi_scan_get_widget_sidebar_map() {
+	$sidebars = get_option( 'sidebars_widgets', array() );
+	$map      = array();
+	if ( ! is_array( $sidebars ) ) {
+		return $map;
+	}
+	foreach ( $sidebars as $sidebar_id => $widget_ids ) {
+		if ( ! is_array( $widget_ids ) || 'wp_inactive_widgets' === $sidebar_id ) {
+			continue;
+		}
+		foreach ( $widget_ids as $widget_id ) {
+			if ( is_string( $widget_id ) && '' !== $widget_id ) {
+				$map[ $widget_id ] = (string) $sidebar_id;
+			}
+		}
+	}
+	return $map;
+}
+
+/**
+ * Human-readable sidebar name.
+ *
+ * @param string $sidebar_id Sidebar ID.
+ * @return string
+ */
+function tsosi_scan_sidebar_label( $sidebar_id ) {
+	$sidebar_id = (string) $sidebar_id;
+	if ( '' === $sidebar_id ) {
+		return '';
+	}
+	global $wp_registered_sidebars;
+	if ( is_array( $wp_registered_sidebars ) && isset( $wp_registered_sidebars[ $sidebar_id ]['name'] ) ) {
+		return (string) $wp_registered_sidebars[ $sidebar_id ]['name'];
+	}
+	return $sidebar_id;
+}
+
+/**
+ * Sidebars where a widget option or instance is active.
+ *
+ * @param string $option_or_instance Widget option name or instance id.
+ * @return string[]
+ */
+function tsosi_scan_widget_sidebar_names( $option_or_instance ) {
+	$option_or_instance = (string) $option_or_instance;
+	$map                = tsosi_scan_get_widget_sidebar_map();
+	$base               = preg_replace( '/-\d+$/', '', $option_or_instance );
+	$base               = preg_replace( '/^widget_/', '', $base );
+	$names              = array();
+
+	foreach ( $map as $instance_id => $sidebar_id ) {
+		$instance_base = preg_replace( '/-\d+$/', '', (string) $instance_id );
+		if ( $instance_id === $option_or_instance || $instance_base === $base ) {
+			$label = tsosi_scan_sidebar_label( $sidebar_id );
+			if ( '' !== $label ) {
+				$names[ $label ] = true;
+			}
+		}
+	}
+
+	return array_keys( $names );
+}
+
+/**
+ * Label for widget rows: option name + sidebar when known.
+ *
+ * @param string $option_name Option or instance name.
+ * @param string $source_type Source type slug.
+ * @return string
+ */
+function tsosi_scan_format_widget_result_label( $option_name, $source_type ) {
+	$option_name = sanitize_text_field( (string) $option_name );
+	if ( 'widget' !== $source_type || '' === $option_name ) {
+		return $option_name;
+	}
+	$sidebars = tsosi_scan_widget_sidebar_names( $option_name );
+	if ( empty( $sidebars ) ) {
+		return $option_name;
+	}
+	return $option_name . ' → ' . implode( ', ', $sidebars );
+}
+
+/**
+ * Whether an option/widget name matches a plugin option prefix needle.
+ *
+ * @param string $option_name Option name.
+ * @param string $prefix      Prefix needle.
+ * @return bool
+ */
+function tsosi_scan_option_name_matches_prefix( $option_name, $prefix ) {
+	$option_name = tsosi_sanitize_option_prefix( $option_name );
+	$prefix        = tsosi_sanitize_option_prefix( $prefix );
+	if ( '' === $option_name || '' === $prefix || 'sidebars_widgets' === $option_name ) {
+		return false;
+	}
+	if ( tsosi_scan_meta_key_matches_prefix( $option_name, $prefix ) ) {
+		return true;
+	}
+	if ( 0 === strpos( $option_name, 'widget_' ) ) {
+		$inner = substr( $option_name, 7 );
+		if ( tsosi_scan_meta_key_matches_prefix( $inner, $prefix ) ) {
+			return true;
+		}
+	}
+	$instance_base = preg_replace( '/-\d+$/', '', $option_name );
+	if ( $instance_base !== $option_name && tsosi_scan_meta_key_matches_prefix( $instance_base, $prefix ) ) {
+		return true;
+	}
+	return false;
+}
+
+/**
+ * Match rows when the wp_options row name itself belongs to the plugin.
+ *
+ * @param string              $option_name Option name.
+ * @param array<string,mixed> $needles     Needles.
+ * @param string              $context     Context label.
+ * @param string              $edit_url    Edit URL.
+ * @param string              $source_type Source type.
+ * @return array<int,array<string,mixed>>
+ */
+function tsosi_scan_rows_for_option_name( $option_name, $needles, $context, $edit_url, $source_type ) {
+	$prefixes = isset( $needles['option_prefixes'] ) && is_array( $needles['option_prefixes'] )
+		? $needles['option_prefixes']
+		: array();
+	if ( empty( $prefixes ) ) {
+		return array();
+	}
+
+	$option_name = sanitize_text_field( (string) $option_name );
+	foreach ( $prefixes as $prefix ) {
+		if ( ! tsosi_scan_option_name_matches_prefix( $option_name, (string) $prefix ) ) {
+			continue;
+		}
+		return array(
+			array(
+				'source_type'  => $source_type,
+				'object_id'    => 0,
+				'object_label' => tsosi_scan_format_widget_result_label( $option_name, $source_type ),
+				'match_type'   => 'option',
+				'match_value'  => $option_name,
+				'context'      => $context,
+				'edit_url'     => $edit_url,
+			),
+		);
+	}
+
+	return array();
+}
+
+/**
+ * Active widget instances listed in sidebars_widgets.
+ *
+ * @param array<string,mixed> $needles  Needles.
+ * @param string              $context  Context.
+ * @param string              $edit_url Edit URL.
+ * @return array<int,array<string,mixed>>
+ */
+function tsosi_scan_active_widget_instances( $needles, $context, $edit_url ) {
+	$prefixes = isset( $needles['option_prefixes'] ) && is_array( $needles['option_prefixes'] )
+		? $needles['option_prefixes']
+		: array();
+	if ( empty( $prefixes ) ) {
+		return array();
+	}
+
+	$found = array();
+	$seen  = array();
+	$map   = tsosi_scan_get_widget_sidebar_map();
+
+	foreach ( $map as $instance_id => $sidebar_id ) {
+		foreach ( $prefixes as $prefix ) {
+			if ( ! tsosi_scan_option_name_matches_prefix( (string) $instance_id, (string) $prefix ) ) {
+				continue;
+			}
+			$widget_option = 'widget_' . preg_replace( '/-\d+$/', '', (string) $instance_id );
+			$key           = $widget_option . '|' . (string) $sidebar_id;
+			if ( isset( $seen[ $key ] ) ) {
+				break;
+			}
+			$seen[ $key ] = true;
+			$sidebar_name = tsosi_scan_sidebar_label( $sidebar_id );
+			$found[]      = array(
+				'source_type'  => 'widget',
+				'object_id'    => 0,
+				'object_label' => $widget_option . ( $sidebar_name ? ' → ' . $sidebar_name : '' ),
+				'match_type'   => 'option',
+				'match_value'  => $widget_option,
+				'context'      => tsosi_ui_triple_text(
+					'Active widget in sidebar',
+					'Widget activo en barra lateral',
+					'Widget actiu a la barra lateral'
+				),
+				'edit_url'     => $edit_url,
+			);
+			break;
+		}
+	}
+
+	return $found;
+}
+
+/**
+ * Sanitize a wp_options name/prefix while keeping hyphens
+ * (e.g. theme_mods_my-child-theme).
+ *
+ * @param string $prefix Raw prefix.
+ * @return string
+ */
+function tsosi_sanitize_option_prefix( $prefix ) {
+	$prefix = strtolower( (string) $prefix );
+	$prefix = preg_replace( '/[^a-z0-9_\-]/', '', $prefix );
+	return is_string( $prefix ) ? $prefix : '';
 }
 
 /**
@@ -884,12 +1467,12 @@ function tsosi_scan_non_autoload_options( $needles ) {
 
 	global $wpdb;
 
-	$found  = array();
-	$ctx    = tsosi_ui_triple_text( 'wp_options (no autoload)', 'wp_options (sin autoload)', 'wp_options (sense autoload)' );
-	$seen   = array();
+	$found = array();
+	$ctx   = tsosi_ui_triple_text( 'wp_options (no autoload)', 'wp_options (sin autoload)', 'wp_options (sense autoload)' );
+	$seen  = array();
 
 	foreach ( $prefixes as $prefix ) {
-		$prefix = sanitize_key( str_replace( '-', '_', (string) $prefix ) );
+		$prefix = tsosi_sanitize_option_prefix( (string) $prefix );
 		if ( strlen( $prefix ) < 3 ) {
 			continue;
 		}
@@ -906,12 +1489,12 @@ function tsosi_scan_non_autoload_options( $needles ) {
 			continue;
 		}
 		foreach ( $rows as $option_name ) {
-			$option_name = sanitize_key( (string) $option_name );
+			$option_name = tsosi_sanitize_option_prefix( (string) $option_name );
 			if ( '' === $option_name || isset( $seen[ $option_name ] ) ) {
 				continue;
 			}
 			$seen[ $option_name ] = true;
-			$found[] = array(
+			$found[]              = array(
 				'source_type'    => 'option',
 				'object_id'      => 0,
 				'object_label'   => $option_name,

@@ -30,3 +30,15 @@ msgstr "Introduce un nombre de bloque."
 
 msgid "Invalid scan mode."
 msgstr "Modo de escaneo no válido."
+
+msgid "Find where plugin shortcodes, blocks, and metadata are used before you deactivate or uninstall."
+msgstr "Encuentra dónde se usan shortcodes, bloques y metadatos de plugins antes de desactivar o desinstalar."
+
+msgid "Open inspector"
+msgstr "Abrir inspector"
+
+msgid "Blog"
+msgstr "Blog"
+
+msgid "Donate"
+msgstr "Donar"

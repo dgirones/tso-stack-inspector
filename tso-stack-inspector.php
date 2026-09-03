@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: TSO Stack Inspector
- * Description: Find where plugin shortcodes, blocks, and metadata are used before you deactivate or uninstall. CA / ES / EN admin UI.
- * Version:     1.1.0
+ * Description: Find where plugin shortcodes, blocks, and metadata are used before you deactivate or uninstall.
+ * Version:     1.0.0
  * Author:      Tu Soporte Online
  * Author URI:  https://www.tusoporteonline.es/blog
  * Requires at least: 6.1
@@ -12,7 +12,6 @@
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain: tso-stack-inspector
  * Domain Path: /languages
- * Contributors: deadko
  *
  * @package TSO_Stack_Inspector
  */
@@ -26,7 +25,7 @@ if ( ! defined( 'TSOSI_FILE' ) ) {
 }
 
 if ( ! defined( 'TSOSI_VERSION' ) ) {
-	define( 'TSOSI_VERSION', '1.1.0' );
+	define( 'TSOSI_VERSION', '1.0.0' );
 }
 
 if ( ! defined( 'TSOSI_PATH' ) ) {
@@ -51,12 +50,26 @@ if ( ! defined( 'TSOSI_SCAN_BATCH_SIZE' ) ) {
 
 require_once TSOSI_PATH . 'includes/tsosi-storage.php';
 require_once TSOSI_PATH . 'includes/tsosi-i18n.php';
+require_once TSOSI_PATH . 'includes/tsosi-support.php';
 require_once TSOSI_PATH . 'includes/tsosi-plugin-profile.php';
 require_once TSOSI_PATH . 'includes/tsosi-scanner.php';
+require_once TSOSI_PATH . 'includes/tsosi-scan-extended.php';
 require_once TSOSI_PATH . 'includes/tsosi-scan-cache.php';
+require_once TSOSI_PATH . 'includes/tsosi-scan-history.php';
+require_once TSOSI_PATH . 'includes/tsosi-scan-risk.php';
+require_once TSOSI_PATH . 'includes/tsosi-replace.php';
+require_once TSOSI_PATH . 'includes/tsosi-orphans.php';
+require_once TSOSI_PATH . 'includes/tsosi-background-scan.php';
+require_once TSOSI_PATH . 'includes/tsosi-bridge.php';
 require_once TSOSI_PATH . 'includes/tsosi-reports.php';
+require_once TSOSI_PATH . 'includes/tsosi-multisite.php';
+require_once TSOSI_PATH . 'includes/tsosi-admin-features.php';
 require_once TSOSI_PATH . 'includes/tsosi-admin-assets.php';
 require_once TSOSI_PATH . 'includes/tsosi-admin.php';
+
+if ( defined( 'WP_CLI' ) && WP_CLI ) {
+	require_once TSOSI_PATH . 'includes/tsosi-cli.php';
+}
 
 /**
  * Plugin activation: schema bump and default settings.

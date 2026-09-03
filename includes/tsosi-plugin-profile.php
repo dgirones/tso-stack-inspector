@@ -424,6 +424,127 @@ function tsosi_discover_plugin_blocks( $plugin_file ) {
 }
 
 /**
+ * wp_options keys that must never become plugin prefix needles (WordPress core).
+ *
+ * @return string[]
+ */
+function tsosi_get_core_wp_option_key_blocklist() {
+	return array(
+		'active_plugins',
+		'admin_email',
+		'blog_charset',
+		'blogdescription',
+		'blogname',
+		'can_compress_scripts',
+		'category_base',
+		'comment_registration',
+		'comments_notify',
+		'cron',
+		'date_format',
+		'db_version',
+		'default_comment_status',
+		'default_ping_status',
+		'default_role',
+		'gmt_offset',
+		'home',
+		'html_type',
+		'links_updated_date_format',
+		'mailserver_login',
+		'mailserver_pass',
+		'mailserver_port',
+		'mailserver_url',
+		'moderation_notify',
+		'page_for_posts',
+		'page_on_front',
+		'permalink_structure',
+		'ping_sites',
+		'posts_per_page',
+		'recently_activated',
+		'rewrite_rules',
+		'siteurl',
+		'start_of_week',
+		'tag_base',
+		'template',
+		'time_format',
+		'timezone_string',
+		'uninstall_plugins',
+		'upload_path',
+		'upload_url_path',
+		'user_roles',
+		'users_can_register',
+		'WPLANG',
+		'wp_user_roles',
+	);
+}
+
+/**
+ * Whether an option key should be ignored when guessing plugin prefixes.
+ *
+ * @param string $key Option key.
+ * @return bool
+ */
+function tsosi_is_blocked_option_key_for_prefix_discovery( $key ) {
+	$key = sanitize_key( (string) $key );
+	if ( '' === $key ) {
+		return true;
+	}
+	if ( in_array( $key, tsosi_get_core_wp_option_key_blocklist(), true ) ) {
+		return true;
+	}
+	if ( 0 === strpos( $key, '_transient_' ) || 0 === strpos( $key, '_site_transient_' ) ) {
+		return true;
+	}
+	return false;
+}
+
+/**
+ * Derive meta/option prefix candidates from a storage key.
+ *
+ * @param string $key Storage key.
+ * @return string[]
+ */
+function tsosi_profile_prefixes_from_storage_key( $key ) {
+	$key = sanitize_key( (string) $key );
+	if ( '' === $key ) {
+		return array();
+	}
+	if ( 0 === strpos( $key, '_' ) ) {
+		$key = substr( $key, 1 );
+	}
+	if ( strlen( $key ) < 3 ) {
+		return array();
+	}
+
+	$parts    = preg_split( '/[_-]/', $key );
+	$prefixes = array();
+	if ( ! empty( $parts[0] ) && strlen( $parts[0] ) >= 5 ) {
+		$prefixes[] = sanitize_key( $parts[0] );
+	}
+	if ( ! empty( $parts[1] ) && strlen( $parts[0] ) >= 2 && strlen( $parts[1] ) >= 2 ) {
+		$prefixes[] = sanitize_key( $parts[0] . '_' . $parts[1] );
+	}
+	if ( ! empty( $parts[2] ) && strlen( $parts[0] ) >= 2 && strlen( $parts[1] ) >= 2 && strlen( $parts[2] ) >= 2 ) {
+		$prefixes[] = sanitize_key( $parts[0] . '_' . $parts[1] . '_' . $parts[2] );
+	}
+
+	return array_values( array_unique( array_filter( $prefixes ) ) );
+}
+
+/**
+ * Whether a storage key is runtime analytics (view counts), not plugin configuration.
+ *
+ * @param string $key Meta or option key.
+ * @return bool
+ */
+function tsosi_is_runtime_analytics_storage_key( $key ) {
+	$key = sanitize_key( ltrim( (string) $key, '_' ) );
+	if ( '' === $key ) {
+		return false;
+	}
+	return (bool) preg_match( '/(?:^|_)(view_count|page_views|post_views|views|hit_count)$/', $key );
+}
+
+/**
  * Guess postmeta / option prefixes referenced by a plugin.
  *
  * @param string $plugin_file Plugin basename.
@@ -448,16 +569,10 @@ function tsosi_discover_plugin_meta_prefixes( $plugin_file ) {
 
 	$prefixes = array();
 	foreach ( $keys as $key ) {
-		if ( 0 === strpos( $key, '_' ) ) {
-			$key = substr( $key, 1 );
-		}
-		if ( strlen( $key ) < 3 ) {
+		if ( tsosi_is_runtime_analytics_storage_key( $key ) ) {
 			continue;
 		}
-		$parts = preg_split( '/[_-]/', $key );
-		if ( ! empty( $parts[0] ) && strlen( $parts[0] ) >= 3 ) {
-			$prefixes[] = sanitize_key( $parts[0] );
-		}
+		$prefixes = array_merge( $prefixes, tsosi_profile_prefixes_from_storage_key( $key ) );
 	}
 
 	$prefixes = array_values( array_unique( array_filter( $prefixes ) ) );
@@ -495,16 +610,10 @@ function tsosi_discover_plugin_option_prefixes( $plugin_file ) {
 
 	$prefixes = array();
 	foreach ( $keys as $key ) {
-		if ( strlen( $key ) < 3 ) {
+		if ( tsosi_is_blocked_option_key_for_prefix_discovery( $key ) ) {
 			continue;
 		}
-		$parts = preg_split( '/[_-]/', $key );
-		if ( ! empty( $parts[0] ) && strlen( $parts[0] ) >= 3 ) {
-			$prefixes[] = sanitize_key( $parts[0] );
-		}
-		if ( ! empty( $parts[1] ) && strlen( $parts[0] ) >= 2 && strlen( $parts[1] ) >= 2 ) {
-			$prefixes[] = sanitize_key( $parts[0] . '_' . $parts[1] );
-		}
+		$prefixes = array_merge( $prefixes, tsosi_profile_prefixes_from_storage_key( $key ) );
 	}
 
 	$prefixes = array_values( array_unique( array_filter( $prefixes ) ) );
@@ -554,8 +663,8 @@ function tsosi_build_plugin_profile( $plugin_file ) {
 		'active'          => tsosi_is_plugin_active_file( $plugin_file ),
 		'shortcodes'      => $shortcodes,
 		'blocks'          => $blocks,
-		'meta_prefixes'   => $prefixes,
-		'option_prefixes' => $opt_prefix,
+		'meta_prefixes'   => tsosi_refine_prefix_list( $prefixes ),
+		'option_prefixes' => tsosi_refine_prefix_list( $opt_prefix ),
 	);
 }
 

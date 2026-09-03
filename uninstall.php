@@ -11,6 +11,9 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 
 delete_option( 'tso_stack_inspector_db_schema' );
 delete_option( 'tso_stack_inspector_scan_settings' );
+delete_option( 'tso_stack_inspector_scan_history' );
+delete_option( 'tso_stack_inspector_replace_backups' );
+delete_option( 'tso_stack_inspector_background_jobs' );
 delete_transient( 'tso_stack_inspector_scan_job' );
 delete_transient( 'tso_stack_inspector_plugin_profile' );
 
@@ -24,6 +27,17 @@ $wpdb->query(
 		"DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s",
 		$tsosi_scan_job_like,
 		$tsosi_timeout_like
+	)
+);
+
+$tsosi_index_job_like         = '_transient_' . $wpdb->esc_like( 'tso_stack_inspector_index_job_' ) . '%';
+$tsosi_index_job_timeout_like = '_transient_timeout_' . $wpdb->esc_like( 'tso_stack_inspector_index_job_' ) . '%';
+// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- uninstall: remove per-user index job transients.
+$wpdb->query(
+	$wpdb->prepare(
+		"DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s",
+		$tsosi_index_job_like,
+		$tsosi_index_job_timeout_like
 	)
 );
 
@@ -45,13 +59,27 @@ $tsosi_uploads = wp_upload_dir();
 if ( empty( $tsosi_uploads['error'] ) && ! empty( $tsosi_uploads['basedir'] ) ) {
 	$tsosi_cache_dir = trailingslashit( $tsosi_uploads['basedir'] ) . 'tso-stack-inspector';
 	if ( is_dir( $tsosi_cache_dir ) ) {
-		$tsosi_cache_files = glob( $tsosi_cache_dir . '/cache-*.json' );
-		if ( is_array( $tsosi_cache_files ) ) {
+		$tsosi_glob_sets = array(
+			glob( $tsosi_cache_dir . '/cache-*.json' ),
+			glob( $tsosi_cache_dir . '/history-*.json' ),
+			glob( $tsosi_cache_dir . '/replace-backup-*.json' ),
+			glob( $tsosi_cache_dir . '/index.html' ),
+			glob( $tsosi_cache_dir . '/index.php' ),
+		);
+		foreach ( $tsosi_glob_sets as $tsosi_cache_files ) {
+			if ( ! is_array( $tsosi_cache_files ) ) {
+				continue;
+			}
 			foreach ( $tsosi_cache_files as $tsosi_cache_file ) {
 				if ( is_string( $tsosi_cache_file ) && is_file( $tsosi_cache_file ) ) {
 					wp_delete_file( $tsosi_cache_file );
 				}
 			}
+		}
+		// Remove empty plugin uploads folder when possible.
+		if ( is_dir( $tsosi_cache_dir ) ) {
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir -- uninstall cleanup of empty uploads slug dir.
+			@rmdir( $tsosi_cache_dir );
 		}
 	}
 }

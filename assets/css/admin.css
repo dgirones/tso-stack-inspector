@@ -1,5 +1,8 @@
 .tsosi-wrap {
 	max-width: 1200px;
+	margin-left: auto;
+	margin-right: auto;
+	float: none;
 }
 
 .tsosi-wrap .tsosi-plugin-version {
@@ -95,10 +98,341 @@
 	margin: 0 0 16px;
 }
 
-.tsosi-results-table td,
-.tsosi-results-table th {
-	vertical-align: top;
+.tsosi-scan-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+	margin: 0 0 12px;
 }
+
+.tsosi-filter-input {
+	min-width: 200px;
+}
+
+.tsosi-filter-count {
+	color: #646970;
+	font-size: 12px;
+}
+
+.tsosi-cache-bar {
+	margin: 12px 0;
+	padding: 10px 14px;
+	background: #f6f7f7;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+}
+
+.tsosi-cache-bar-main {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+}
+
+.tsosi-cache-bar .tsosi-field-help {
+	margin-top: 8px;
+	max-width: 960px;
+}
+
+.tsosi-settings-group {
+	margin: 16px 0 0;
+	padding: 12px 0 0;
+	border: 0;
+}
+
+.tsosi-settings-group legend {
+	font-weight: 600;
+	padding: 0 4px 8px 0;
+}
+
+.tsosi-settings-field {
+	margin: 8px 0 14px;
+}
+
+.tsosi-settings-field-help {
+	display: block;
+	margin: 4px 0 0 24px;
+	max-width: 720px;
+}
+
+.tsosi-theme-profile {
+	margin: 12px 0 16px;
+	padding: 12px 14px;
+	background: #fff;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+}
+
+.tsosi-theme-select {
+	min-width: 280px;
+	max-width: 100%;
+}
+
+.tsosi-check-row {
+	display: block;
+	margin: 6px 0;
+}
+
+.tsosi-background-option {
+	margin-right: 12px;
+}
+
+.tsosi-history-toolbar {
+	margin: 0 0 12px;
+}
+
+.tsosi-history-actions {
+	white-space: nowrap;
+}
+
+.tsosi-risk-banner {
+	margin: 0 0 14px;
+	padding: 12px 14px;
+	border-radius: 4px;
+	border: 1px solid #c3c4c7;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.tsosi-risk-banner .tsosi-risk-help {
+	font-size: 13px;
+	color: #50575e;
+}
+
+.tsosi-risk-safe {
+	background: #edfaef;
+	border-color: #68de7c;
+}
+
+.tsosi-risk-review {
+	background: #fcf9e8;
+	border-color: #dba617;
+}
+
+.tsosi-risk-danger {
+	background: #fcf0f1;
+	border-color: #d63638;
+}
+
+.tsosi-risk-pill {
+	display: inline-block;
+	padding: 2px 8px;
+	border-radius: 3px;
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.tsosi-risk-pill.tsosi-risk-safe {
+	background: #edfaef;
+	color: #007017;
+}
+
+.tsosi-risk-pill.tsosi-risk-review {
+	background: #fcf9e8;
+	color: #996800;
+}
+
+.tsosi-risk-pill.tsosi-risk-danger {
+	background: #fcf0f1;
+	color: #b32d2e;
+}
+
+.tsosi-inactive-audit-results {
+	margin-top: 16px;
+}
+
+.tsosi-risk-cta {
+	margin: 8px 0 0;
+}
+
+.tsosi-replace-results {
+	margin-top: 16px;
+}
+
+.tsosi-history-diff-box {
+	margin: 12px 0 16px;
+	padding: 16px 18px;
+	background: #fff;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+}
+
+.tsosi-history-diff-box h3 {
+	margin: 0 0 6px;
+}
+
+.tsosi-history-diff-box > .description {
+	margin: 0 0 14px;
+}
+
+.tsosi-history-diff-form {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+	gap: 12px 16px;
+	align-items: end;
+}
+
+.tsosi-history-diff-field {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	min-width: 0;
+}
+
+.tsosi-history-diff-field label {
+	font-weight: 600;
+}
+
+.tsosi-history-diff-field select {
+	width: 100%;
+	max-width: 100%;
+}
+
+.tsosi-history-diff-vs {
+	align-self: center;
+	font-weight: 600;
+	color: #646970;
+	padding: 0 4px 10px;
+	text-transform: lowercase;
+}
+
+.tsosi-history-diff-actions {
+	grid-column: 1 / -1;
+	padding-top: 4px;
+}
+
+.tsosi-history-diff-results {
+	margin-top: 16px;
+	padding-top: 14px;
+	border-top: 1px solid #dcdcde;
+}
+
+.tsosi-history-diff-summary {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	margin: 0 0 16px;
+}
+
+.tsosi-history-diff-stat {
+	flex: 1 1 140px;
+	padding: 10px 14px;
+	background: #f6f7f7;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+}
+
+.tsosi-history-diff-stat strong {
+	display: block;
+	font-size: 20px;
+	line-height: 1.2;
+	margin-bottom: 2px;
+}
+
+.tsosi-history-diff-stat span {
+	color: #646970;
+	font-size: 12px;
+}
+
+.tsosi-history-diff-table-wrap {
+	margin-bottom: 16px;
+	overflow-x: auto;
+}
+
+.tsosi-history-diff-table-wrap h4 {
+	margin: 0 0 8px;
+}
+
+@media (max-width: 782px) {
+	.tsosi-history-diff-form {
+		grid-template-columns: 1fr;
+	}
+
+	.tsosi-history-diff-vs {
+		display: none;
+	}
+}
+
+.tsosi-compare-results {
+	margin-top: 16px;
+	overflow-x: auto;
+}
+
+.tsosi-compare-table {
+	margin-top: 8px;
+	table-layout: fixed;
+	width: 100%;
+}
+
+.tsosi-compare-table th,
+.tsosi-compare-table td {
+	vertical-align: top;
+	word-break: break-word;
+}
+
+.tsosi-compare-table thead th {
+	white-space: normal;
+}
+
+.tsosi-compare-table tbody th {
+	width: 18%;
+	font-weight: 600;
+}
+
+.tsosi-compare-list {
+	margin: 0;
+	padding-left: 1.2em;
+}
+
+.tsosi-compare-list li {
+	margin: 0 0 4px;
+}
+
+.tsosi-group-toggle {
+	margin-left: 12px;
+	white-space: nowrap;
+}
+
+.tsosi-match-line {
+	margin: 0 0 6px;
+	line-height: 1.5;
+}
+
+.tsosi-match-type {
+	display: inline-block;
+	min-width: 5.5em;
+	color: #646970;
+	font-size: 12px;
+	text-transform: uppercase;
+	letter-spacing: 0.02em;
+}
+
+.tsosi-match-context {
+	display: block;
+	color: #646970;
+	font-size: 12px;
+	margin: 2px 0 0 0;
+}
+
+.tsosi-copy-tag {
+	margin-left: 4px;
+	vertical-align: middle;
+}
+
+.tsosi-checklist {
+	margin: 12px 0 0;
+}
+
+.tsosi-checklist ol {
+	margin: 6px 0 0 1.2em;
+}
+
+.tsosi-checklist li {
+	margin: 0 0 4px;
+}
+
 
 .tsosi-profile-details {
 	margin-top: 16px;

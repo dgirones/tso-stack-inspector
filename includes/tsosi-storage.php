@@ -10,7 +10,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 if ( ! defined( 'TSOSI_DB_SCHEMA' ) ) {
-	define( 'TSOSI_DB_SCHEMA', 1 );
+	define( 'TSOSI_DB_SCHEMA', 2 );
 }
 
 if ( ! defined( 'TSOSI_OPTION_DB_SCHEMA' ) ) {
@@ -29,6 +29,18 @@ if ( ! defined( 'TSOSI_TRANSIENT_SCAN_JOB_PREFIX' ) ) {
 	define( 'TSOSI_TRANSIENT_SCAN_JOB_PREFIX', 'tso_stack_inspector_scan_job_' );
 }
 
+if ( ! defined( 'TSOSI_TRANSIENT_INDEX_JOB_PREFIX' ) ) {
+	define( 'TSOSI_TRANSIENT_INDEX_JOB_PREFIX', 'tso_stack_inspector_index_job_' );
+}
+
+if ( ! defined( 'TSOSI_SCAN_HISTORY_MAX_DEFAULT' ) ) {
+	define( 'TSOSI_SCAN_HISTORY_MAX_DEFAULT', 20 );
+}
+
+if ( ! defined( 'TSOSI_SCAN_HISTORY_MAX_HARD' ) ) {
+	define( 'TSOSI_SCAN_HISTORY_MAX_HARD', 100 );
+}
+
 if ( ! defined( 'TSOSI_TRANSIENT_PLUGIN_PROFILE' ) ) {
 	define( 'TSOSI_TRANSIENT_PLUGIN_PROFILE', 'tso_stack_inspector_plugin_profile' );
 }
@@ -43,6 +55,14 @@ if ( ! defined( 'TSOSI_ADMIN_POST_ACTION' ) ) {
 
 if ( ! defined( 'TSOSI_ADMIN_QUERY_SET_LANG' ) ) {
 	define( 'TSOSI_ADMIN_QUERY_SET_LANG', 'tsosi_set_lang' );
+}
+
+if ( ! defined( 'TSOSI_ADMIN_QUERY_REPLACE_KIND' ) ) {
+	define( 'TSOSI_ADMIN_QUERY_REPLACE_KIND', 'tsosi_replace_kind' );
+}
+
+if ( ! defined( 'TSOSI_ADMIN_QUERY_REPLACE_FROM' ) ) {
+	define( 'TSOSI_ADMIN_QUERY_REPLACE_FROM', 'tsosi_replace_from' );
 }
 
 /**
@@ -119,6 +139,117 @@ function tsosi_get_admin_post_text( $key, $default = '' ) {
 }
 
 /**
+ * Read sanitized admin POST textarea after form nonce verification.
+ *
+ * @param string $key     POST key.
+ * @param string $default Default when missing.
+ * @return string
+ */
+function tsosi_get_admin_post_textarea( $key, $default = '' ) {
+	$key = (string) $key;
+	if ( '' === $key || ! isset( $_POST[ $key ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via tsosi_verify_admin_form_nonce().
+		return $default;
+	}
+	return sanitize_textarea_field( (string) wp_unslash( $_POST[ $key ] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via tsosi_verify_admin_form_nonce().
+}
+
+/**
+ * Sanitize ignore-list tokens (shortcode tags, block names, meta/option keys).
+ *
+ * @param mixed $tokens Raw tokens or newline-separated text.
+ * @return string[]
+ */
+function tsosi_sanitize_ignore_tokens( $tokens ) {
+	if ( is_string( $tokens ) ) {
+		$tokens = preg_split( '/\r\n|\r|\n/', $tokens );
+	}
+	if ( ! is_array( $tokens ) ) {
+		return array();
+	}
+
+	$clean = array();
+	foreach ( $tokens as $token ) {
+		$token = strtolower( trim( (string) $token ) );
+		if ( '' === $token || '#' === $token[0] ) {
+			continue;
+		}
+		$sanitized = preg_replace( '/[^a-z0-9\/_-]/', '', $token );
+		if ( ! is_string( $sanitized ) || '' === $sanitized ) {
+			continue;
+		}
+		$clean[ $sanitized ] = $sanitized;
+	}
+
+	return array_values( $clean );
+}
+
+/**
+ * Whether a match value is on the admin ignore list.
+ *
+ * @param string $value Match value (tag, block name, meta key).
+ * @return bool
+ */
+function tsosi_scan_value_is_ignored( $value ) {
+	$value = strtolower( trim( (string) $value ) );
+	if ( '' === $value ) {
+		return false;
+	}
+
+	$settings = tsosi_get_scan_settings();
+	$tokens   = isset( $settings['ignore_tokens'] ) && is_array( $settings['ignore_tokens'] )
+		? $settings['ignore_tokens']
+		: array();
+
+	foreach ( $tokens as $token ) {
+		$token = strtolower( (string) $token );
+		if ( '' === $token ) {
+			continue;
+		}
+		if ( $value === $token || 0 === strpos( $value, $token ) ) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/**
+ * Read sanitized checkbox from admin POST after form nonce verification.
+ *
+ * @param string $key POST key.
+ * @return bool
+ */
+function tsosi_get_admin_post_checkbox( $key ) {
+	$key = (string) $key;
+	if ( '' === $key || ! isset( $_POST[ $key ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via tsosi_verify_admin_form_nonce().
+		return false;
+	}
+	return ! empty( $_POST[ $key ] ); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via tsosi_verify_admin_form_nonce().
+}
+
+/**
+ * Read sanitized string array from admin POST after form nonce verification.
+ *
+ * @param string $key POST key.
+ * @return string[]
+ */
+function tsosi_get_admin_post_array( $key ) {
+	$key = (string) $key;
+	if ( '' === $key || ! isset( $_POST[ $key ] ) || ! is_array( $_POST[ $key ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via tsosi_verify_admin_form_nonce().
+		return array();
+	}
+	$raw = wp_unslash( $_POST[ $key ] ); // phpcs:ignore WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Caller verified via tsosi_verify_admin_form_nonce(); values sanitized via sanitize_key below.
+	if ( ! is_array( $raw ) ) {
+		return array();
+	}
+	return array_values(
+		array_filter(
+			array_map( 'sanitize_key', $raw )
+		)
+	);
+}
+
+/**
  * Sanitize a shortcode tag (preserve hyphens; sanitize_key strips them).
  *
  * @param string $tag Shortcode tag.
@@ -168,11 +299,17 @@ function tsosi_migrate_storage() {
  */
 function tsosi_get_default_scan_settings() {
 	return array(
-		'post_statuses' => array( 'publish', 'draft', 'pending', 'future', 'private' ),
-		'include_reusable_blocks' => true,
-		'include_widgets'         => true,
-		'include_menus'           => true,
+		'post_statuses'                => array( 'publish', 'draft', 'pending', 'future', 'private' ),
+		'include_reusable_blocks'      => true,
+		'include_widgets'              => true,
+		'include_menus'                => true,
 		'include_non_autoload_options' => true,
+		'include_user_meta'            => true,
+		'include_term_meta'            => true,
+		'include_comment_meta'         => true,
+		'include_theme_mods'           => true,
+		'history_max'                  => TSOSI_SCAN_HISTORY_MAX_DEFAULT,
+		'ignore_tokens'                => array(),
 	);
 }
 
@@ -197,7 +334,7 @@ function tsosi_update_scan_settings( $settings ) {
 	}
 	$defaults = tsosi_get_default_scan_settings();
 	$clean    = array(
-		'post_statuses'           => array_values(
+		'post_statuses'                => array_values(
 			array_filter(
 				array_map(
 					'sanitize_key',
@@ -205,12 +342,26 @@ function tsosi_update_scan_settings( $settings ) {
 				)
 			)
 		),
-		'include_reusable_blocks' => ! empty( $settings['include_reusable_blocks'] ),
-		'include_widgets'         => ! empty( $settings['include_widgets'] ),
-		'include_menus'           => ! empty( $settings['include_menus'] ),
+		'include_reusable_blocks'      => ! empty( $settings['include_reusable_blocks'] ),
+		'include_widgets'              => ! empty( $settings['include_widgets'] ),
+		'include_menus'                => ! empty( $settings['include_menus'] ),
 		'include_non_autoload_options' => ! empty( $settings['include_non_autoload_options'] ),
+		'include_user_meta'            => ! empty( $settings['include_user_meta'] ),
+		'include_term_meta'            => ! empty( $settings['include_term_meta'] ),
+		'include_comment_meta'         => ! empty( $settings['include_comment_meta'] ),
+		'include_theme_mods'           => ! empty( $settings['include_theme_mods'] ),
+		'history_max'                  => max(
+			1,
+			min(
+				TSOSI_SCAN_HISTORY_MAX_HARD,
+				absint( $settings['history_max'] ?? TSOSI_SCAN_HISTORY_MAX_DEFAULT )
+			)
+		),
+		'ignore_tokens'                => tsosi_sanitize_ignore_tokens( $settings['ignore_tokens'] ?? array() ),
 	);
 	update_option( TSOSI_OPTION_SCAN_SETTINGS, $clean );
+	tsosi_flush_all_content_caches();
+	tsosi_scan_history_enforce_max();
 }
 
 /**
@@ -249,11 +400,18 @@ function tsosi_get_uploads_dir() {
 			'error' => true,
 		);
 	}
-	$index = $path . '/index.php';
-	if ( ! is_file( $index ) ) {
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- non-executable stub in uploads.
-		file_put_contents( $index, "<?php\n// Silence is golden.\n" );
+
+	// Prefer a non-PHP directory index (WordPress.org / TSO: no generated PHP under uploads).
+	$legacy_php = $path . '/index.php';
+	if ( is_file( $legacy_php ) ) {
+		wp_delete_file( $legacy_php );
 	}
+	$index_html = $path . '/index.html';
+	if ( ! is_file( $index_html ) ) {
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- non-executable stub in uploads.
+		file_put_contents( $index_html, "<!DOCTYPE html><title></title>\n" );
+	}
+
 	return array(
 		'path'  => $path,
 		'url'   => $url,

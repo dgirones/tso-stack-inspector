@@ -96,14 +96,19 @@ function tsosi_admin_get_report_css_inline() {
  * @return array<string,mixed>
  */
 function tsosi_admin_get_js_config() {
-	$lang = tsosi_get_ui_lang();
-	$base = defined( 'TSOSI_URL' ) ? trailingslashit( TSOSI_URL ) : '';
+	$lang     = tsosi_get_ui_lang();
+	$base     = defined( 'TSOSI_URL' ) ? trailingslashit( TSOSI_URL ) : '';
+	$settings = tsosi_get_scan_settings();
+	$cache    = tsosi_scan_get_cache_status();
 
 	return array(
 		'ajaxUrl'      => admin_url( 'admin-ajax.php' ),
 		'nonce'        => wp_create_nonce( TSOSI_NONCE_AJAX ),
 		'lang'         => $lang,
 		'batchSize'    => TSOSI_SCAN_BATCH_SIZE,
+		'indexReady'   => ! empty( $cache['ready'] ),
+		'indexStorageReady' => tsosi_scan_content_cache_storage_ready(),
+		'ignoreTokens' => array_values( (array) ( $settings['ignore_tokens'] ?? array() ) ),
 		'csvHeaders'      => tsosi_reports_csv_headers(),
 		'reportCssUrl'    => $base . 'assets/css/report.css',
 		'reportCssVer'    => tsosi_admin_asset_file_version( 'assets/css/report.css' ),
@@ -141,6 +146,110 @@ function tsosi_admin_get_js_config() {
 			'refreshFail'  => tsosi_ui_triple_text( 'Could not refresh signatures.', 'No se pudieron actualizar las firmas.', 'No s\'han pogut actualitzar les signatures.' ),
 			'reportTitle'  => tsosi_ui_triple_text( 'Stack Inspector report', 'Informe Stack Inspector', 'Informe Stack Inspector' ),
 			'editLabel'    => tsosi_ui_triple_text( 'Edit', 'Editar', 'Editar' ),
+			'filterCount'  => tsosi_ui_triple_text( 'Showing %1$s of %2$s', 'Mostrando %1$s de %2$s', 'Mostrant %1$s de %2$s' ),
+			'scanCancelled' => tsosi_ui_triple_text( 'Scan cancelled.', 'Escaneo cancelado.', 'Escaneig cancel·lat.' ),
+			'backgroundScan' => tsosi_ui_triple_text( 'Background scan', 'Escaneo en segundo plano', 'Escaneig en segon pla' ),
+			'themeShortcodes' => tsosi_ui_triple_text( 'Shortcodes', 'Shortcodes', 'Shortcodes' ),
+			'themeBlocks'     => tsosi_ui_triple_text( 'Blocks', 'Bloques', 'Blocs' ),
+			'themeMeta'       => tsosi_ui_triple_text( 'Meta prefixes', 'Prefijos meta', 'Prefixos meta' ),
+			'historyDeleteConfirm' => tsosi_ui_triple_text(
+				'Delete this scan from history?',
+				'¿Borrar este escaneo del historial?',
+				'Esborrar aquest escaneig de l\'historial?'
+			),
+			'historyClearConfirm' => tsosi_ui_triple_text(
+				'Clear all scan history? This cannot be undone.',
+				'¿Vaciar todo el historial de escaneos? No se puede deshacer.',
+				'Buidar tot l\'historial d\'escaneigs? No es pot desfer.'
+			),
+			'historyEmpty' => tsosi_ui_triple_text(
+				'No saved scans yet.',
+				'Aún no hay escaneos guardados.',
+				'Encara no hi ha escaneigs desats.'
+			),
+			'compareShared' => tsosi_ui_triple_text( 'Shared', 'Compartidos', 'Compartits' ),
+			'compareOnlyA'  => tsosi_ui_triple_text( 'Only in %s', 'Solo en %s', 'Només a %s' ),
+			'compareOnlyB'  => tsosi_ui_triple_text( 'Only in %s', 'Solo en %s', 'Només a %s' ),
+			'compareColType' => tsosi_ui_triple_text( 'Type', 'Tipo', 'Tipus' ),
+			'compareFieldShortcodes' => tsosi_ui_triple_text( 'Shortcodes', 'Shortcodes', 'Shortcodes' ),
+			'compareFieldBlocks' => tsosi_ui_triple_text( 'Blocks', 'Bloques', 'Blocs' ),
+			'compareFieldMeta' => tsosi_ui_triple_text( 'Meta prefixes', 'Prefijos meta', 'Prefixos meta' ),
+			'compareFieldOptions' => tsosi_ui_triple_text( 'Option prefixes', 'Prefijos de opciones', 'Prefixos d\'opcions' ),
+			'riskSafe'      => tsosi_ui_triple_text( 'Safe', 'Seguro', 'Segur' ),
+			'riskReview'    => tsosi_ui_triple_text( 'Review', 'Revisar', 'Revisar' ),
+			'riskDanger'    => tsosi_ui_triple_text( 'Risk', 'Riesgo', 'Risc' ),
+			'auditRunning'  => tsosi_ui_triple_text( 'Auditing inactive plugins…', 'Auditando plugins inactivos…', 'Auditant plugins inactius…' ),
+			'auditDone'     => tsosi_ui_triple_text( 'Audit complete.', 'Auditoría completada.', 'Auditoria completada.' ),
+			'auditEmpty'    => tsosi_ui_triple_text( 'No inactive plugins found.', 'No hay plugins inactivos.', 'No hi ha plugins inactius.' ),
+			'auditColPlugin'=> tsosi_ui_triple_text( 'Plugin', 'Plugin', 'Plugin' ),
+			'auditColMatches'=> tsosi_ui_triple_text( 'Matches', 'Coincidencias', 'Coincidències' ),
+			'auditColRisk'  => tsosi_ui_triple_text( 'Risk', 'Riesgo', 'Risc' ),
+			'auditColAction'=> tsosi_ui_triple_text( 'Action', 'Acción', 'Acció' ),
+			'auditOpenScan' => tsosi_ui_triple_text( 'Open scan', 'Abrir escaneo', 'Obrir escaneig' ),
+			'cleanerCta'    => tsosi_ui_triple_text( 'Clean leftovers in Options Cleaner', 'Limpiar restos en Options Cleaner', 'Netejar restes a Options Cleaner' ),
+			'cleanerMissing'=> tsosi_ui_triple_text(
+				'Install/activate TSO Options & Tables Cleaner to remove leftover options and tables after uninstall.',
+				'Instala/activa TSO Options & Tables Cleaner para borrar opciones y tablas sobrantes tras desinstalar.',
+				'Instal·la/activa TSO Options & Tables Cleaner per esborrar opcions i taules sobrants després de desinstal·lar.'
+			),
+			'filterContentOnly' => tsosi_ui_triple_text( 'Show content matches only', 'Mostrar solo coincidencias de contenido', 'Mostrar només coincidències de contingut' ),
+			'filterDataOnly'    => tsosi_ui_triple_text( 'Show data matches only', 'Mostrar solo coincidencias de datos', 'Mostrar només coincidències de dades' ),
+			'replacePreviewing' => tsosi_ui_triple_text( 'Previewing…', 'Previsualizando…', 'Previsualitzant…' ),
+			'replacePreviewCount' => tsosi_ui_triple_text( '%d post(s) would change.', '%d entrada(s) cambiarían.', '%d entrada(es) canviarien.' ),
+			'replaceCapped' => tsosi_ui_triple_text( '(List capped; refine your search if needed.)', '(Lista limitada; afina la búsqueda si hace falta.)', '(Llista limitada; afina la cerca si cal.)' ),
+			'replaceNone'   => tsosi_ui_triple_text( 'No matching content found.', 'No se encontró contenido coincidente.', 'No s\'ha trobat contingut coincident.' ),
+			'replaceConfirm'=> tsosi_ui_triple_text(
+				'Apply replacement to the listed posts? Keep a backup. This edits post content permanently.',
+				'¿Aplicar la sustitución a las entradas listadas? Haz una copia de seguridad. Edita el contenido de forma permanente.',
+				'Aplicar la substitució a les entrades llistades? Fes una còpia de seguretat. Edita el contingut de forma permanent.'
+			),
+			'replaceApplying' => tsosi_ui_triple_text( 'Applying…', 'Aplicando…', 'Aplicant…' ),
+			'replaceDone'   => tsosi_ui_triple_text( 'Replacement finished.', 'Sustitución terminada.', 'Substitució acabada.' ),
+			'replaceBatch'  => tsosi_ui_triple_text(
+				'Updated %1$s (skipped %2$s, errors %3$s). Continuing…',
+				'Actualizadas %1$s (omitidas %2$s, errores %3$s). Continuando…',
+				'Actualitzades %1$s (ometudes %2$s, errors %3$s). Continuant…'
+			),
+			'replaceColTitle' => tsosi_ui_triple_text( 'Title', 'Título', 'Títol' ),
+			'replaceColType'  => tsosi_ui_triple_text( 'Type', 'Tipo', 'Tipus' ),
+			'replaceBackupSaved' => tsosi_ui_triple_text( 'Backup saved for undo.', 'Copia guardada para deshacer.', 'Còpia desada per desfer.' ),
+			'replaceUpdatedTotal' => tsosi_ui_triple_text( 'Updated %d.', 'Actualizadas %d.', 'Actualitzades %d.' ),
+			'replaceUndoConfirm' => tsosi_ui_triple_text(
+				'Restore previous content from this backup?',
+				'¿Restaurar el contenido anterior desde esta copia?',
+				'Restaurar el contingut anterior des d\'aquesta còpia?'
+			),
+			'replaceUndoDone' => tsosi_ui_triple_text( 'Restored %d post(s).', 'Restauradas %d entrada(s).', 'Restaurades %d entrada(es).' ),
+			'orphansRunning' => tsosi_ui_triple_text( 'Searching for orphans…', 'Buscando huérfanos…', 'Cercant orfes…' ),
+			'orphansDone' => tsosi_ui_triple_text(
+				'Found %1$s orphan shortcodes, %2$s orphan blocks.',
+				'Encontrados %1$s shortcodes huérfanos, %2$s bloques huérfanos.',
+				'Trobats %1$s shortcodes orfes, %2$s blocs orfes.'
+			),
+			'orphansShortcodes' => tsosi_ui_triple_text( 'Orphan shortcodes', 'Shortcodes huérfanos', 'Shortcodes orfes' ),
+			'orphansBlocks' => tsosi_ui_triple_text( 'Orphan blocks', 'Bloques huérfanos', 'Blocs orfes' ),
+			'orphansSamples' => tsosi_ui_triple_text( 'Samples', 'Ejemplos', 'Exemples' ),
+			'diffPickTwo' => tsosi_ui_triple_text( 'Pick two different history entries.', 'Elige dos entradas distintas del historial.', 'Tria dues entrades diferents de l\'historial.' ),
+			'diffAdded' => tsosi_ui_triple_text( 'Added in A (not in B)', 'Añadidos en A (no en B)', 'Afegits a A (no a B)' ),
+			'diffRemoved' => tsosi_ui_triple_text( 'Removed (in B, not in A)', 'Eliminados (en B, no en A)', 'Eliminats (a B, no a A)' ),
+			'diffAddedRows' => tsosi_ui_triple_text( 'New matches in scan A', 'Nuevas coincidencias en el escaneo A', 'Noves coincidències a l\'escaneig A' ),
+			'diffRemovedRows' => tsosi_ui_triple_text( 'Matches only in scan B', 'Coincidencias solo en el escaneo B', 'Coincidències només a l\'escaneig B' ),
+			'diffColLocation' => tsosi_ui_triple_text( 'Location', 'Ubicación', 'Ubicació' ),
+			'diffColType' => tsosi_ui_triple_text( 'Type', 'Tipo', 'Tipus' ),
+			'diffColMatch' => tsosi_ui_triple_text( 'Match', 'Coincidencia', 'Coincidència' ),
+			'copyTag' => tsosi_ui_triple_text( 'Copy', 'Copiar', 'Copia' ),
+			'copied' => tsosi_ui_triple_text( 'Copied', 'Copiado', 'Copiat' ),
+			'replaceTag' => tsosi_ui_triple_text( 'Replace', 'Sustituir', 'Substitueix' ),
+			'indexBuilding' => tsosi_ui_triple_text( 'Preparing site index… %s%', 'Preparando índice… %s%', 'Preparant índex… %s%' ),
+			'indexReadyLabel' => tsosi_ui_triple_text( 'Site index cached', 'Índice del sitio en caché', 'Índex del lloc en memòria cau' ),
+			'indexRebuilt' => tsosi_ui_triple_text( 'Site index rebuilt.', 'Índice del sitio reconstruido.', 'Índex del lloc reconstruït.' ),
+			'checklistTitle' => tsosi_ui_triple_text( 'Before you uninstall', 'Antes de desinstalar', 'Abans de desinstal·lar' ),
+			'checklist1' => tsosi_ui_triple_text( 'Replace or remove remaining shortcodes and blocks in content.', 'Sustituye o elimina los shortcodes y bloques que queden en el contenido.', 'Substitueix o elimina els shortcodes i blocs que quedin al contingut.' ),
+			'checklist2' => tsosi_ui_triple_text( 'Check widgets, menus, and reusable blocks.', 'Revisa widgets, menús y bloques reutilizables.', 'Revisa widgets, menús i blocs reutilitzables.' ),
+			'checklist3' => tsosi_ui_triple_text( 'Deactivate the plugin and smoke-test the front end.', 'Desactiva el plugin y prueba el sitio.', 'Desactiva el plugin i prova el lloc.' ),
+			'checklist4' => tsosi_ui_triple_text( 'Uninstall only after the site still looks correct.', 'Desinstala solo cuando el sitio siga viéndose bien.', 'Desinstal·la només quan el lloc encara es vegi bé.' ),
+			'checklist5' => tsosi_ui_triple_text( 'Clean leftover options/tables with Options Cleaner if needed.', 'Limpia opciones/tablas sobrantes con Options Cleaner si hace falta.', 'Neteja opcions/taules sobrants amb Options Cleaner si cal.' ),
 		),
+		'cleanerAvailable' => tsosi_options_cleaner_is_available(),
 	);
 }

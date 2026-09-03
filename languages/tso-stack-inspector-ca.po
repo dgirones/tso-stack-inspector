@@ -30,3 +30,15 @@ msgstr "Introdueix un nom de bloc."
 
 msgid "Invalid scan mode."
 msgstr "Mode d'escaneig no vàlid."
+
+msgid "Find where plugin shortcodes, blocks, and metadata are used before you deactivate or uninstall."
+msgstr "Troba on s'utilitzen shortcodes, blocs i metadades de plugins abans de desactivar o desinstal·lar."
+
+msgid "Open inspector"
+msgstr "Obrir inspector"
+
+msgid "Blog"
+msgstr "Blog"
+
+msgid "Donate"
+msgstr "Donar"
