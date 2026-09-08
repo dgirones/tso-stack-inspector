@@ -96,21 +96,4 @@ No data is transmitted to external servers. Scans run only when an administrator
 == Changelog ==
 
 = 1.0.0 =
-* Plugin, shortcode, block, and theme scans with batched AJAX
-* Widget detection by option name and active sidebar placement
-* Site Editor templates, reusable blocks, menus, and wp_options scanning
-* Plugin signature discovery (shortcodes, blocks, meta/option prefixes) with refresh
-* Safer prefix matching (skip core WP keys, peer-plugin keys, analytics meta noise)
-* Auto-built site content index (background batches; does not block the Tools screen)
-* Ignore list in Settings to hide noisy tags/keys
-* Grouped scan results, copy tag, and a pre-uninstall checklist
-* Orphans finder with Replace deep link and CSV export
-* Inactive plugins audit with CSV export
-* Uninstall risk verdict (safe / review / risk)
-* Replace tab: dry-run, batched apply, backups (~48h) with Undo
-* History with delete/clear and diff between two scans
-* Compare plugins (shared vs exclusive signatures) in a table layout
-* Export CSV / printable report; Options Cleaner deep link when available
-* CA / ES / EN admin UI; Plugins screen description follows WP locale
-* Blog and Donate links on the Plugins screen
-* WP-CLI: `tsosi scan`, `tsosi orphans`, `tsosi audit-inactive`; Multisite network admin entry
+* First version
