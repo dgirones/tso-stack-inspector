@@ -1188,6 +1188,9 @@ function tsosi_scan_options( $needles ) {
 		if ( in_array( $name, $skip_exact, true ) ) {
 			continue;
 		}
+		if ( tsosi_is_sensitive_storage_option_name( $name ) ) {
+			continue;
+		}
 		foreach ( $skip_prefixes as $prefix ) {
 			if ( 0 === strpos( $name, $prefix ) ) {
 				continue 2;
@@ -1491,6 +1494,9 @@ function tsosi_scan_non_autoload_options( $needles ) {
 		foreach ( $rows as $option_name ) {
 			$option_name = tsosi_sanitize_option_prefix( (string) $option_name );
 			if ( '' === $option_name || isset( $seen[ $option_name ] ) ) {
+				continue;
+			}
+			if ( tsosi_is_sensitive_storage_option_name( $option_name ) ) {
 				continue;
 			}
 			$seen[ $option_name ] = true;

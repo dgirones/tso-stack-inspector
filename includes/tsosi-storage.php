@@ -439,9 +439,55 @@ function tsosi_get_uploads_dir() {
 		file_put_contents( $index_html, "<!DOCTYPE html><title></title>\n" );
 	}
 
+	tsosi_protect_uploads_dir( $path );
+
 	return array(
 		'path'  => $path,
 		'url'   => $url,
 		'error' => false,
 	);
+}
+
+/**
+ * Deny direct HTTP access to plugin uploads (JSON caches may contain site content).
+ *
+ * @param string $path Absolute uploads subdirectory path.
+ * @return void
+ */
+function tsosi_protect_uploads_dir( $path ) {
+	$path = untrailingslashit( (string) $path );
+	if ( '' === $path || ! is_dir( $path ) ) {
+		return;
+	}
+
+	$htaccess = $path . '/.htaccess';
+	$rules    = "# TSO Stack Inspector — deny direct web access to cache/history/backups.\n"
+		. "<IfModule mod_authz_core.c>\n"
+		. "\tRequire all denied\n"
+		. "</IfModule>\n"
+		. "<IfModule !mod_authz_core.c>\n"
+		. "\tOrder deny,allow\n"
+		. "\tDeny from all\n"
+		. "</IfModule>\n";
+
+	$existing = is_readable( $htaccess ) ? (string) file_get_contents( $htaccess ) : ''; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- local deny rules only.
+	if ( false === strpos( $existing, 'Require all denied' ) ) {
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- Apache deny rules for private uploads.
+		file_put_contents( $htaccess, $rules );
+	}
+
+	$web_config = $path . '/web.config';
+	$iis        = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+		. "<configuration>\n"
+		. "\t<system.webServer>\n"
+		. "\t\t<authorization>\n"
+		. "\t\t\t<deny users=\"*\" />\n"
+		. "\t\t</authorization>\n"
+		. "\t</system.webServer>\n"
+		. "</configuration>\n";
+
+	if ( ! is_file( $web_config ) ) {
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- IIS deny rules for private uploads.
+		file_put_contents( $web_config, $iis );
+	}
 }

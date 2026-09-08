@@ -51,17 +51,16 @@ function tsosi_set_ui_lang( $lang ) {
 }
 
 /**
- * Load plugin textdomain from shipped MO files.
+ * Intentionally empty on WordPress.org builds.
+ *
+ * Community translations are delivered via translate.wordpress.org language packs
+ * (WordPress loads them automatically for hosted plugins). Bundled .po/.mo files
+ * are not shipped in the .org ZIP. Admin Tools UI uses tsosi_ui_triple_text().
  *
  * @return void
  */
 function tsosi_load_textdomain() {
-	$domain = 'tso-stack-inspector';
-	$locale = determine_locale();
-	$mofile = TSOSI_PATH . 'languages/' . $domain . '-' . $locale . '.mo';
-	if ( is_readable( $mofile ) ) {
-		load_textdomain( $domain, $mofile );
-	}
+	// No-op: do not load bundled catalogs; rely on WordPress.org language packs.
 }
 
 /**

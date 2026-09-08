@@ -11,7 +11,6 @@
  * License:     GPLv2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain: tso-stack-inspector
- * Domain Path: /languages
  *
  * @package TSO_Stack_Inspector
  */
@@ -89,6 +88,5 @@ register_activation_hook( TSOSI_FILE, 'tsosi_activate' );
  */
 function tsosi_bootstrap() {
 	tsosi_migrate_storage();
-	tsosi_load_textdomain();
 }
 add_action( 'plugins_loaded', 'tsosi_bootstrap' );

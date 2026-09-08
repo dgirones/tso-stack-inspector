@@ -44,7 +44,7 @@ Scan posts, pages, custom post types, reusable blocks, Site Editor templates, wi
 * **Grouped results** — scan hits grouped by location, with copy-tag and a pre-uninstall checklist
 * **Orphans → Replace** — jump from an orphan tag to the Replace tab already filled in
 * **Export CSV** — scan results, orphans, and inactive-plugin audits
-* **Admin UI languages** — English, Spanish, and Catalan (Plugins screen follows the WordPress site locale)
+* **Admin UI languages** — English, Spanish, and Catalan in the Tools screen; community translations via translate.wordpress.org after publication
 
 **How it works**
 
@@ -88,7 +88,7 @@ TSO Stack Inspector stores only:
 * Optional scan settings in `wp_options` (`tso_stack_inspector_scan_settings`), including history size limit
 * A short index of recent completed scans in `wp_options` (`tso_stack_inspector_scan_history`)
 * Temporary scan job data in transients (auto-expire)
-* Optional site-index cache, scan-history JSON, and replace-backup JSON under `wp-content/uploads/tso-stack-inspector/` (local disk only; removed on uninstall when possible)
+* Optional site-index cache, scan-history JSON, and replace-backup JSON under `wp-content/uploads/tso-stack-inspector/` (local disk only; directory is denied via `.htaccess` / `web.config` + empty `index.html`; removed on uninstall when possible)
 * Replace backup index in `wp_options` (`tso_stack_inspector_replace_backups`, ~48h retention)
 
 No data is transmitted to external servers. Scans run only when an administrator starts them from Tools → TSO Stack Inspector.

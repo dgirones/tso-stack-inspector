@@ -948,6 +948,9 @@ function tsosi_scan_extract_autoload_option_sources() {
 		if ( in_array( $name, $skip_exact, true ) ) {
 			continue;
 		}
+		if ( tsosi_is_sensitive_storage_option_name( $name ) ) {
+			continue;
+		}
 		foreach ( $skip_prefixes as $prefix ) {
 			if ( 0 === strpos( $name, $prefix ) ) {
 				continue 2;

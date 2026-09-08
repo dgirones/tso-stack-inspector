@@ -491,9 +491,63 @@ function tsosi_is_blocked_option_key_for_prefix_discovery( $key ) {
 	if ( in_array( $key, tsosi_get_core_wp_option_key_blocklist(), true ) ) {
 		return true;
 	}
+	if ( tsosi_is_sensitive_storage_option_name( $key ) ) {
+		return true;
+	}
 	if ( 0 === strpos( $key, '_transient_' ) || 0 === strpos( $key, '_site_transient_' ) ) {
 		return true;
 	}
+	return false;
+}
+
+/**
+ * Whether an option name must never be read or indexed by Stack Inspector (secrets / API keys).
+ *
+ * @param string $name Option name.
+ * @return bool
+ */
+function tsosi_is_sensitive_storage_option_name( $name ) {
+	$name = strtolower( trim( (string) $name ) );
+	if ( '' === $name ) {
+		return true;
+	}
+
+	// WordPress AI Client / Abilities API connectors (e.g. connectors_ai_*_api_key).
+	if ( preg_match( '/^connectors_ai_.+_api_key$/', $name ) ) {
+		return true;
+	}
+	if ( 0 === strpos( $name, 'connectors_ai_' ) && false !== strpos( $name, 'api_key' ) ) {
+		return true;
+	}
+
+	$fragments = array(
+		'api_key',
+		'apikey',
+		'api-secret',
+		'apisecret',
+		'client_secret',
+		'clientsecret',
+		'private_key',
+		'privatekey',
+		'secret_key',
+		'secretkey',
+		'auth_token',
+		'access_token',
+		'refresh_token',
+		'bearer_token',
+		'password',
+		'passwd',
+		'mailserver_pass',
+		'smtp_pass',
+		'smtp_password',
+	);
+
+	foreach ( $fragments as $fragment ) {
+		if ( false !== strpos( $name, $fragment ) ) {
+			return true;
+		}
+	}
+
 	return false;
 }
 

@@ -65,6 +65,8 @@ if ( empty( $tsosi_uploads['error'] ) && ! empty( $tsosi_uploads['basedir'] ) ) 
 			glob( $tsosi_cache_dir . '/replace-backup-*.json' ),
 			glob( $tsosi_cache_dir . '/index.html' ),
 			glob( $tsosi_cache_dir . '/index.php' ),
+			glob( $tsosi_cache_dir . '/.htaccess' ),
+			glob( $tsosi_cache_dir . '/web.config' ),
 		);
 		foreach ( $tsosi_glob_sets as $tsosi_cache_files ) {
 			if ( ! is_array( $tsosi_cache_files ) ) {
