@@ -34,9 +34,11 @@ function tsosi_background_register_job( $user_id ) {
 	if ( $user_id <= 0 ) {
 		return;
 	}
-	$jobs            = tsosi_background_get_jobs();
+	$lock             = tsosi_acquire_lock( 'background_jobs' );
+	$jobs             = tsosi_background_get_jobs();
 	$jobs[ $user_id ] = time();
 	update_option( TSOSI_OPTION_BACKGROUND_JOBS, $jobs, false );
+	tsosi_release_lock( $lock );
 	if ( ! wp_next_scheduled( TSOSI_CRON_SCAN_HOOK ) ) {
 		wp_schedule_event( time() + 30, 'tsosi_every_minute', TSOSI_CRON_SCAN_HOOK );
 	}
@@ -48,11 +50,13 @@ function tsosi_background_register_job( $user_id ) {
  */
 function tsosi_background_unregister_job( $user_id ) {
 	$user_id = absint( $user_id );
+	$lock    = tsosi_acquire_lock( 'background_jobs' );
 	$jobs    = tsosi_background_get_jobs();
 	if ( isset( $jobs[ $user_id ] ) ) {
 		unset( $jobs[ $user_id ] );
 		update_option( TSOSI_OPTION_BACKGROUND_JOBS, $jobs, false );
 	}
+	tsosi_release_lock( $lock );
 	if ( empty( $jobs ) ) {
 		wp_clear_scheduled_hook( TSOSI_CRON_SCAN_HOOK );
 	}

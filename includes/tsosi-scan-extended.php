@@ -154,17 +154,17 @@ function tsosi_scan_user_meta( $needles ) {
 		if ( ! $hit ) {
 			continue;
 		}
-		$user = get_userdata( $user_id );
-		$label = $user instanceof WP_User ? $user->user_login : (string) $user_id;
+		$user    = get_userdata( $user_id );
+		$label   = $user instanceof WP_User ? $user->user_login : (string) $user_id;
 		$found[] = array(
-			'source_type'  => 'user_meta',
-			'object_id'    => $user_id,
-			'object_label' => $label,
+			'source_type'    => 'user_meta',
+			'object_id'      => $user_id,
+			'object_label'   => $label,
 			'object_subtype' => 'user',
-			'match_type'   => 'meta',
-			'match_value'  => $meta_key,
-			'context'      => $ctx,
-			'edit_url'     => admin_url( 'user-edit.php?user_id=' . $user_id ),
+			'match_type'     => 'meta',
+			'match_value'    => $meta_key,
+			'context'        => $ctx,
+			'edit_url'       => admin_url( 'user-edit.php?user_id=' . $user_id ),
 		);
 	}
 
@@ -220,9 +220,9 @@ function tsosi_scan_term_meta( $needles ) {
 		if ( ! $hit ) {
 			continue;
 		}
-		$term = get_term( $term_id );
-		$label = ( $term instanceof WP_Term && ! is_wp_error( $term ) ) ? $term->name : (string) $term_id;
-		$edit  = ( $term instanceof WP_Term && ! is_wp_error( $term ) )
+		$term    = get_term( $term_id );
+		$label   = ( $term instanceof WP_Term && ! is_wp_error( $term ) ) ? $term->name : (string) $term_id;
+		$edit    = ( $term instanceof WP_Term && ! is_wp_error( $term ) )
 			? get_edit_term_link( $term, $term->taxonomy )
 			: '';
 		$found[] = array(
@@ -292,14 +292,14 @@ function tsosi_scan_comment_meta( $needles ) {
 		$comment = get_comment( $comment_id );
 		$label   = $comment instanceof WP_Comment ? wp_trim_words( (string) $comment->comment_content, 8, '…' ) : (string) $comment_id;
 		$found[] = array(
-			'source_type'  => 'comment_meta',
-			'object_id'    => $comment_id,
-			'object_label' => $label,
+			'source_type'    => 'comment_meta',
+			'object_id'      => $comment_id,
+			'object_label'   => $label,
 			'object_subtype' => 'comment',
-			'match_type'   => 'meta',
-			'match_value'  => $meta_key,
-			'context'      => $ctx,
-			'edit_url'     => admin_url( 'comment.php?action=editcomment&c=' . $comment_id ),
+			'match_type'     => 'meta',
+			'match_value'    => $meta_key,
+			'context'        => $ctx,
+			'edit_url'       => admin_url( 'comment.php?action=editcomment&c=' . $comment_id ),
 		);
 	}
 
@@ -428,10 +428,15 @@ function tsosi_build_theme_profile( $stylesheet = '' ) {
 	$shortcodes = array();
 	$blocks     = array();
 
-	$iterator = new RecursiveIteratorIterator(
+	// Gather every candidate path first (cheap -- no file reads yet), then sort
+	// deterministically and cap, same as tsosi_profile_collect_php_files(). Capping
+	// while iterating made the scan depend on filesystem order alone, so a theme
+	// with more than TSOSI_PROFILE_MAX_FILES matching files could silently miss
+	// add_shortcode()/register_block_type() calls depending only on directory order.
+	$candidates = array();
+	$iterator   = new RecursiveIteratorIterator(
 		new RecursiveDirectoryIterator( $dir, FilesystemIterator::SKIP_DOTS )
 	);
-	$count = 0;
 	foreach ( $iterator as $file ) {
 		if ( ! $file instanceof SplFileInfo || ! $file->isFile() ) {
 			continue;
@@ -443,15 +448,34 @@ function tsosi_build_theme_profile( $stylesheet = '' ) {
 		if ( $file->getSize() > TSOSI_PROFILE_MAX_FILE_BYTES ) {
 			continue;
 		}
-		++$count;
-		if ( $count > TSOSI_PROFILE_MAX_FILES ) {
-			break;
+		$candidates[] = wp_normalize_path( $path );
+	}
+	$files = tsosi_profile_sort_and_cap_files( $candidates, $dir, TSOSI_PROFILE_MAX_FILES );
+
+	// Blocks registered purely via a block.json manifest (no matching PHP
+	// register_block_type() call -- the modern, recommended pattern) would
+	// otherwise never surface. Mirrors tsosi_discover_plugin_blocks().
+	foreach ( tsosi_profile_collect_block_json_files( $dir ) as $json_path ) {
+		$name = tsosi_profile_block_name_from_json_path( $json_path );
+		if ( '' !== $name ) {
+			$blocks[] = tsosi_sanitize_block_name( $name );
 		}
+	}
+
+	foreach ( $files as $path ) {
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- theme code scan.
 		$source = file_get_contents( $path );
 		if ( ! is_string( $source ) || '' === $source ) {
 			continue;
 		}
+		// Strip comments/docblocks before scanning -- see tsosi_profile_strip_php_comments()
+		// in tsosi-plugin-profile.php. Without this, an *example* tag/block name written in
+		// a theme file's own comment (e.g. documenting a filter, or a code sample in a
+		// starter theme's readme-in-PHP header) is indistinguishable from a real
+		// add_shortcode()/register_block_type() call and gets attributed to the theme. A
+		// no-op on .js/.jsx/.tsx sources (no "<?php" tag, so PHP's tokenizer treats the
+		// whole file as one inline-HTML token and returns it unchanged).
+		$source = tsosi_profile_strip_php_comments( $source );
 		if ( preg_match_all( '/add_shortcode\s*\(\s*[\'"]([^\'"]+)[\'"]/', $source, $m ) ) {
 			foreach ( $m[1] as $tag ) {
 				$tag = tsosi_sanitize_shortcode_tag( (string) $tag );
@@ -460,11 +484,23 @@ function tsosi_build_theme_profile( $stylesheet = '' ) {
 				}
 			}
 		}
-		if ( preg_match_all( '/register_block_type\s*\(\s*[\'"]([^\'"]+)[\'"]/', $source, $m2 ) ) {
+		if ( preg_match_all( '/register_block_type\s*\(\s*[\'"]([a-z0-9\/_-]+)[\'"]/i', $source, $m2 ) ) {
 			foreach ( $m2[1] as $block ) {
 				$block = tsosi_sanitize_block_name( (string) $block );
 				if ( '' !== $block ) {
 					$blocks[] = $block;
+				}
+			}
+		}
+		// register_block_type() given a path (to a directory or its block.json) rather
+		// than a literal block name -- resolve it to the real name instead of treating
+		// the path string itself as a block name (the previous, broader regex did this).
+		if ( preg_match_all( '/register_block_type\s*\(\s*[^;]*[\'"]([^\'"]*block\.json)[\'"]/i', $source, $json_refs ) ) {
+			foreach ( $json_refs[1] as $json_hint ) {
+				$json_path = tsosi_profile_resolve_block_json_path( $path, $json_hint );
+				$name      = tsosi_profile_block_name_from_json_path( $json_path );
+				if ( '' !== $name ) {
+					$blocks[] = tsosi_sanitize_block_name( $name );
 				}
 			}
 		}
@@ -509,8 +545,8 @@ function tsosi_compare_plugin_profiles( $plugin_file_a, $plugin_file_b ) {
 	);
 
 	foreach ( $fields as $field ) {
-		$set_a = isset( $a[ $field ] ) && is_array( $a[ $field ] ) ? $a[ $field ] : array();
-		$set_b = isset( $b[ $field ] ) && is_array( $b[ $field ] ) ? $b[ $field ] : array();
+		$set_a                   = isset( $a[ $field ] ) && is_array( $a[ $field ] ) ? $a[ $field ] : array();
+		$set_b                   = isset( $b[ $field ] ) && is_array( $b[ $field ] ) ? $b[ $field ] : array();
 		$out['shared'][ $field ] = array_values( array_intersect( $set_a, $set_b ) );
 		$out['only_a'][ $field ] = array_values( array_diff( $set_a, $set_b ) );
 		$out['only_b'][ $field ] = array_values( array_diff( $set_b, $set_a ) );

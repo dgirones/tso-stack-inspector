@@ -10,6 +10,20 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
+ * Bracket-text false positives that look exactly like a shortcode tag but are not one on
+ * any real site -- most notably "[email&#160;protected]", the literal text Cloudflare's
+ * (and other CDN/hosting) email obfuscation leaves in the page/content source as a
+ * decoy/fallback for "[email]" + " protected]" while its own JS rewrites it client-side.
+ * That single, very common pattern would otherwise show up as an "orphan shortcode" on a
+ * large share of real WordPress sites -- see tsosi_orphans_is_plausible_shortcode_tag().
+ *
+ * @return string[]
+ */
+function tsosi_orphans_get_known_false_positive_tags() {
+	return array( 'email' );
+}
+
+/**
  * Whether a parsed tag looks like a real shortcode (not a regex charset fragment).
  *
  * @param string $tag Shortcode tag.
@@ -25,6 +39,9 @@ function tsosi_orphans_is_plausible_shortcode_tag( $tag ) {
 	}
 	// Regex charset fragments often found in serialized options (e.g. rewrite_rules): [a-z], [0-9].
 	if ( preg_match( '/^[a-z0-9](-[a-z0-9]+)+$/', $tag ) ) {
+		return false;
+	}
+	if ( in_array( $tag, tsosi_orphans_get_known_false_positive_tags(), true ) ) {
 		return false;
 	}
 	return true;
@@ -124,12 +141,21 @@ function tsosi_orphans_registered_block_map() {
  * Harvest tags/blocks from the cached site index.
  *
  * @param array<string,mixed> $index Cached index.
- * @return array{shortcodes:array<string,int>,blocks:array<string,int>,samples:array<string,array<int,array<string,mixed>>>}
+ * @return array{shortcodes:array<string,int>,blocks:array<string,int>,samples:array<string,array<int,array<string,mixed>>>,post_sourced:array<string,array<string,bool>>}
  */
 function tsosi_orphans_harvest_from_index( $index ) {
 	$shortcodes = array();
 	$blocks     = array();
 	$samples    = array(
+		'shortcodes' => array(),
+		'blocks'     => array(),
+	);
+	// Whether a tag/block was seen in at least one real post (id > 0), as opposed to only
+	// ever appearing in a widget or menu row (object id 0). The Replace tab only ever
+	// touches post_content (see tsosi_replace_post_types()' docblock) -- a widget/menu-only
+	// orphan can never actually be fixed by it, so tsosi_orphans_find() must not offer a
+	// "Replace" action that would silently do nothing for that tag.
+	$post_sourced = array(
 		'shortcodes' => array(),
 		'blocks'     => array(),
 	);
@@ -161,6 +187,9 @@ function tsosi_orphans_harvest_from_index( $index ) {
 					$shortcodes[ $tag ] = 0;
 				}
 				++$shortcodes[ $tag ];
+				if ( $post_id > 0 ) {
+					$post_sourced['shortcodes'][ $tag ] = true;
+				}
 				if ( ! isset( $samples['shortcodes'][ $tag ] ) ) {
 					$samples['shortcodes'][ $tag ] = array();
 				}
@@ -177,6 +206,9 @@ function tsosi_orphans_harvest_from_index( $index ) {
 					$blocks[ $block ] = 0;
 				}
 				++$blocks[ $block ];
+				if ( $post_id > 0 ) {
+					$post_sourced['blocks'][ $block ] = true;
+				}
 				if ( ! isset( $samples['blocks'][ $block ] ) ) {
 					$samples['blocks'][ $block ] = array();
 				}
@@ -193,53 +225,84 @@ function tsosi_orphans_harvest_from_index( $index ) {
 
 	$extras = isset( $index['extras'] ) && is_array( $index['extras'] ) ? $index['extras'] : array();
 	foreach ( $extras as $row ) {
-		if ( ! is_array( $row ) || empty( $row['blob'] ) || ! is_string( $row['blob'] ) ) {
+		if ( ! is_array( $row ) ) {
 			continue;
 		}
-		// Orphans = leftover tags in editor content/widgets — skip raw wp_options (rewrite_rules, etc.).
 		$kind = isset( $row['kind'] ) ? sanitize_key( (string) $row['kind'] ) : '';
-		if ( 'widget' !== $kind ) {
+
+		// Orphans = leftover tags in editor content/widgets/menus — skip raw wp_options
+		// (rewrite_rules, etc.), which are read-only serialized core/plugin state, not
+		// editor content a site owner authored a shortcode/block into.
+		if ( 'widget' === $kind ) {
+			if ( empty( $row['blob'] ) || ! is_string( $row['blob'] ) ) {
+				continue;
+			}
+			$label = isset( $row['label'] ) ? (string) $row['label'] : 'widget';
+			$edit  = isset( $row['edit_url'] ) ? (string) $row['edit_url'] : '';
+			$blobs = array( $row['blob'] );
+		} elseif ( 'menu' === $kind ) {
+			// Menu rows are shaped differently from widget/option rows (see
+			// tsosi_scan_extract_menu_source()): the searchable text lives in an
+			// 'items' array (one nav-menu item's title + description per entry), not
+			// in a single 'blob'. The main "by plugin/shortcode/block" scan already
+			// treats nav menus as real scan territory (tsosi_scan_match_menu_source())
+			// -- the orphan finder must look at the same content or it silently misses
+			// shortcodes/blocks that only live in a menu item (a common pattern for
+			// "mega menu" / icon-in-menu-title plugins).
+			$items = isset( $row['items'] ) && is_array( $row['items'] ) ? $row['items'] : array();
+			$blobs = array_values( array_filter( $items, 'is_string' ) );
+			if ( empty( $blobs ) ) {
+				continue;
+			}
+			$label = isset( $row['name'] ) ? (string) $row['name'] : 'menu';
+			$edit  = ! empty( $row['term_id'] )
+				? admin_url( 'nav-menus.php?action=edit&menu=' . absint( $row['term_id'] ) )
+				: '';
+		} else {
 			continue;
 		}
-		$label = isset( $row['label'] ) ? (string) $row['label'] : (string) ( $row['kind'] ?? 'extra' );
-		foreach ( tsosi_orphans_extract_shortcodes_from_blob( $row['blob'] ) as $tag ) {
-			if ( ! isset( $shortcodes[ $tag ] ) ) {
-				$shortcodes[ $tag ] = 0;
+
+		foreach ( $blobs as $blob ) {
+			foreach ( tsosi_orphans_extract_shortcodes_from_blob( $blob ) as $tag ) {
+				if ( ! isset( $shortcodes[ $tag ] ) ) {
+					$shortcodes[ $tag ] = 0;
+				}
+				++$shortcodes[ $tag ];
+				if ( ! isset( $samples['shortcodes'][ $tag ] ) ) {
+					$samples['shortcodes'][ $tag ] = array();
+				}
+				if ( count( $samples['shortcodes'][ $tag ] ) < 5 ) {
+					$samples['shortcodes'][ $tag ][] = array(
+						'id'    => 0,
+						'title' => $label,
+						'edit'  => $edit,
+					);
+				}
 			}
-			++$shortcodes[ $tag ];
-			if ( ! isset( $samples['shortcodes'][ $tag ] ) ) {
-				$samples['shortcodes'][ $tag ] = array();
-			}
-			if ( count( $samples['shortcodes'][ $tag ] ) < 5 ) {
-				$samples['shortcodes'][ $tag ][] = array(
-					'id'    => 0,
-					'title' => $label,
-					'edit'  => isset( $row['edit_url'] ) ? (string) $row['edit_url'] : '',
-				);
-			}
-		}
-		foreach ( tsosi_orphans_extract_blocks_from_blob( $row['blob'] ) as $block ) {
-			if ( ! isset( $blocks[ $block ] ) ) {
-				$blocks[ $block ] = 0;
-			}
-			++$blocks[ $block ];
-			if ( ! isset( $samples['blocks'][ $block ] ) ) {
-				$samples['blocks'][ $block ] = array();
-			}
-			if ( count( $samples['blocks'][ $block ] ) < 5 ) {
-				$samples['blocks'][ $block ][] = array(
-					'id'    => 0,
-					'title' => $label,
-					'edit'  => isset( $row['edit_url'] ) ? (string) $row['edit_url'] : '',
-				);
+			foreach ( tsosi_orphans_extract_blocks_from_blob( $blob ) as $block ) {
+				if ( ! isset( $blocks[ $block ] ) ) {
+					$blocks[ $block ] = 0;
+				}
+				++$blocks[ $block ];
+				if ( ! isset( $samples['blocks'][ $block ] ) ) {
+					$samples['blocks'][ $block ] = array();
+				}
+				if ( count( $samples['blocks'][ $block ] ) < 5 ) {
+					$samples['blocks'][ $block ][] = array(
+						'id'    => 0,
+						'title' => $label,
+						'edit'  => $edit,
+					);
+				}
 			}
 		}
 	}
 
 	return array(
-		'shortcodes' => $shortcodes,
-		'blocks'     => $blocks,
-		'samples'    => $samples,
+		'shortcodes'   => $shortcodes,
+		'blocks'       => $blocks,
+		'samples'      => $samples,
+		'post_sourced' => $post_sourced,
 	);
 }
 
@@ -294,6 +357,10 @@ function tsosi_orphans_find() {
 		if ( tsosi_scan_value_is_ignored( (string) $tag ) ) {
 			continue;
 		}
+		// The Replace tab only ever edits post_content -- offering it here for a tag that
+		// only ever showed up in a widget/menu row would silently do nothing when clicked
+		// (see tsosi_orphans_harvest_from_index()).
+		$has_post_source     = ! empty( $harvest['post_sourced']['shortcodes'][ $tag ] );
 		$orphan_shortcodes[] = array(
 			'tag'         => $tag,
 			'count'       => (int) $count,
@@ -305,7 +372,7 @@ function tsosi_orphans_find() {
 				),
 				admin_url( 'tools.php' )
 			),
-			'replace_url' => tsosi_orphans_replace_url( 'shortcode', (string) $tag ),
+			'replace_url' => $has_post_source ? tsosi_orphans_replace_url( 'shortcode', (string) $tag ) : '',
 		);
 	}
 
@@ -318,6 +385,7 @@ function tsosi_orphans_find() {
 		if ( tsosi_scan_value_is_ignored( (string) $name ) ) {
 			continue;
 		}
+		$has_post_source = ! empty( $harvest['post_sourced']['blocks'][ $name ] );
 		$orphan_blocks[] = array(
 			'name'        => $name,
 			'count'       => (int) $count,
@@ -329,7 +397,7 @@ function tsosi_orphans_find() {
 				),
 				admin_url( 'tools.php' )
 			),
-			'replace_url' => tsosi_orphans_replace_url( 'block', (string) $name ),
+			'replace_url' => $has_post_source ? tsosi_orphans_replace_url( 'block', (string) $name ) : '',
 		);
 	}
 

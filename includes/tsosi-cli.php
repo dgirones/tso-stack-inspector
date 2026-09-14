@@ -32,8 +32,9 @@ class TSOSI_CLI_Scan_Command {
 	 * [--block=<name>]
 	 * : Block name namespace/block
 	 *
-	 * [--theme]
-	 * : Scan active theme signatures
+	 * [--theme[=<stylesheet>]]
+	 * : Scan theme signatures. Pass a stylesheet slug to scan a specific (including inactive)
+	 * theme, e.g. --theme=twentytwentyfour; bare --theme scans the active theme.
 	 *
 	 * [--format=<format>]
 	 * : table, json, csv, count
@@ -59,10 +60,14 @@ class TSOSI_CLI_Scan_Command {
 				'mode'  => 'block',
 				'block' => tsosi_sanitize_block_name( (string) $assoc_args['block'] ),
 			);
-		} elseif ( ! empty( $assoc_args['theme'] ) ) {
+		} elseif ( isset( $assoc_args['theme'] ) ) {
+			$stylesheet = is_string( $assoc_args['theme'] ) ? $assoc_args['theme'] : '';
+			if ( '' === $stylesheet ) {
+				$stylesheet = (string) wp_get_theme()->get_stylesheet();
+			}
 			$query = array(
 				'mode'  => 'theme',
-				'theme' => sanitize_text_field( (string) wp_get_theme()->get_stylesheet() ),
+				'theme' => tsosi_sanitize_theme_stylesheet( $stylesheet ),
 			);
 		} elseif ( ! empty( $assoc_args['plugin'] ) ) {
 			$query = array(
@@ -102,7 +107,7 @@ class TSOSI_CLI_Scan_Command {
 
 	/**
 	 * @param array<int,array<string,mixed>> $results Results.
-	 * @param array<string,string>          $assoc_args Flags.
+	 * @param array<string,string>           $assoc_args Flags.
 	 * @return void
 	 */
 	private function output_results( $results, $assoc_args ) {
@@ -294,6 +299,10 @@ class TSOSI_CLI_Audit_Inactive_Command {
 				'data'    => isset( $row['data'] ) ? (int) $row['data'] : 0,
 				'risk'    => isset( $row['risk_level'] ) ? (string) $row['risk_level'] : '',
 			);
+		}
+
+		if ( ! empty( $result['capped'] ) ) {
+			WP_CLI::warning( 'Only the first 60 inactive plugins were audited; some were not checked.' );
 		}
 
 		$format = isset( $assoc_args['format'] ) ? sanitize_key( (string) $assoc_args['format'] ) : 'table';

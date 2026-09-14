@@ -9,6 +9,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+if ( ! defined( 'TSOSI_OPTIONS_CLEANER_BASENAME' ) ) {
+	define( 'TSOSI_OPTIONS_CLEANER_BASENAME', 'tso-options-tables-cleaner/tso-options-tables-cleaner.php' );
+}
+if ( ! defined( 'TSOSI_OPTIONS_CLEANER_SLUG' ) ) {
+	define( 'TSOSI_OPTIONS_CLEANER_SLUG', 'tso-options-tables-cleaner' );
+}
+
 /**
  * Whether Options Cleaner is available.
  *
@@ -16,6 +23,66 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 function tsosi_options_cleaner_is_available() {
 	return '' !== tsosi_get_options_cleaner_url();
+}
+
+/**
+ * Call-to-action for the Options Cleaner promo, covering all three states: active (deep
+ * link into its own screen), installed but inactive (an activate link), or not installed
+ * at all (a WordPress.org install-search link) -- gated by the current user's own
+ * activate_plugins/install_plugins capability so the link is always usable, never a dead
+ * end for someone who can't act on it.
+ *
+ * @return array{state:string,url:string,label:string}|null Null when there's nothing this
+ *         user can do about it right now (not installed and can't install plugins).
+ */
+function tsosi_get_options_cleaner_cta() {
+	if ( ! function_exists( 'is_plugin_active' ) || ! function_exists( 'get_plugins' ) ) {
+		require_once ABSPATH . 'wp-admin/includes/plugin.php';
+	}
+
+	if ( is_plugin_active( TSOSI_OPTIONS_CLEANER_BASENAME ) ) {
+		return array(
+			'state' => 'active',
+			'url'   => admin_url( 'tools.php?page=tso-options-tables-cleaner' ),
+			'label' => tsosi_ui_triple_text(
+				'After uninstalling, clean leftover options and tables with TSO Options & Tables Cleaner.',
+				'Tras desinstalar, limpia opciones y tablas sobrantes con TSO Options & Tables Cleaner.',
+				'Després de desinstal·lar, neteja opcions i taules sobrants amb TSO Options & Tables Cleaner.'
+			),
+		);
+	}
+
+	$installed = get_plugins();
+	if ( isset( $installed[ TSOSI_OPTIONS_CLEANER_BASENAME ] ) ) {
+		if ( ! current_user_can( 'activate_plugins' ) ) {
+			return null;
+		}
+		return array(
+			'state' => 'inactive',
+			'url'   => wp_nonce_url(
+				admin_url( 'plugins.php?action=activate&plugin=' . rawurlencode( TSOSI_OPTIONS_CLEANER_BASENAME ) ),
+				'activate-plugin_' . TSOSI_OPTIONS_CLEANER_BASENAME
+			),
+			'label' => tsosi_ui_triple_text(
+				'Activate TSO Options & Tables Cleaner to clean leftover options and tables after uninstalling.',
+				'Activa TSO Options & Tables Cleaner para limpiar opciones y tablas sobrantes tras desinstalar.',
+				'Activa TSO Options & Tables Cleaner per netejar opcions i taules sobrants després de desinstal·lar.'
+			),
+		);
+	}
+
+	if ( ! current_user_can( 'install_plugins' ) ) {
+		return null;
+	}
+	return array(
+		'state' => 'not_installed',
+		'url'   => admin_url( 'plugin-install.php?s=' . rawurlencode( TSOSI_OPTIONS_CLEANER_SLUG ) . '&tab=search&type=term' ),
+		'label' => tsosi_ui_triple_text(
+			'Install TSO Options & Tables Cleaner to clean leftover options and tables after uninstalling.',
+			'Instala TSO Options & Tables Cleaner para limpiar opciones y tablas sobrantes tras desinstalar.',
+			'Instal·la TSO Options & Tables Cleaner per netejar opcions i taules sobrants després de desinstal·lar.'
+		),
+	);
 }
 
 /**

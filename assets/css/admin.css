@@ -192,8 +192,17 @@
 	border-radius: 4px;
 	border: 1px solid #c3c4c7;
 	display: flex;
+	flex-flow: row wrap;
+	align-items: flex-start;
+	gap: 4px 24px;
+}
+
+.tsosi-risk-main {
+	display: flex;
 	flex-direction: column;
 	gap: 4px;
+	flex: 1 1 260px;
+	min-width: 0;
 }
 
 .tsosi-risk-banner .tsosi-risk-help {
@@ -214,6 +223,11 @@
 .tsosi-risk-danger {
 	background: #fcf0f1;
 	border-color: #d63638;
+}
+
+.tsosi-risk-info {
+	background: #f0f6fc;
+	border-color: #72aee6;
 }
 
 .tsosi-risk-pill {
@@ -237,6 +251,11 @@
 .tsosi-risk-pill.tsosi-risk-danger {
 	background: #fcf0f1;
 	color: #b32d2e;
+}
+
+.tsosi-risk-pill.tsosi-risk-unknown {
+	background: #f0f0f1;
+	color: #50575e;
 }
 
 .tsosi-inactive-audit-results {
@@ -422,15 +441,41 @@
 }
 
 .tsosi-checklist {
-	margin: 12px 0 0;
+	margin: 0;
+	flex: 1 1 220px;
+	min-width: 200px;
+	max-width: 320px;
+	padding-left: 16px;
+	border-left: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.tsosi-checklist p {
+	margin: 0 0 4px;
 }
 
 .tsosi-checklist ol {
-	margin: 6px 0 0 1.2em;
+	margin: 0 0 0 1.2em;
+	font-size: 12px;
+	line-height: 1.4;
 }
 
 .tsosi-checklist li {
-	margin: 0 0 4px;
+	margin: 0 0 2px;
+}
+
+@media (max-width: 782px) {
+	.tsosi-risk-banner {
+		flex-direction: column;
+	}
+
+	.tsosi-checklist {
+		max-width: none;
+		padding-left: 0;
+		border-left: none;
+		margin-top: 8px;
+		padding-top: 8px;
+		border-top: 1px solid rgba(0, 0, 0, 0.1);
+	}
 }
 
 

@@ -81,6 +81,18 @@ function tsosi_activate() {
 register_activation_hook( TSOSI_FILE, 'tsosi_activate' );
 
 /**
+ * Plugin deactivation: clear the background-scan cron event.
+ *
+ * @return void
+ */
+function tsosi_deactivate() {
+	if ( function_exists( 'wp_clear_scheduled_hook' ) && defined( 'TSOSI_CRON_SCAN_HOOK' ) ) {
+		wp_clear_scheduled_hook( TSOSI_CRON_SCAN_HOOK );
+	}
+}
+register_deactivation_hook( TSOSI_FILE, 'tsosi_deactivate' );
+
+/**
  * Bootstrap hooks.
  *
  * @return void

@@ -74,7 +74,13 @@ function tsosi_admin_handle_language_switch() {
 		return;
 	}
 	tsosi_set_ui_lang( $lang );
-	wp_safe_redirect( admin_url( 'tools.php?page=tso-stack-inspector' ) );
+
+	$redirect_args = array( 'page' => 'tso-stack-inspector' );
+	$tab           = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Nonce verified via check_admin_referer() above; only used to keep the admin on the same tab.
+	if ( '' !== $tab && in_array( $tab, tsosi_admin_tab_slugs(), true ) ) {
+		$redirect_args['tab'] = $tab;
+	}
+	wp_safe_redirect( add_query_arg( $redirect_args, admin_url( 'tools.php' ) ) );
 	exit;
 }
 add_action( 'admin_init', 'tsosi_admin_handle_language_switch' );
@@ -98,10 +104,10 @@ function tsosi_admin_render_page() {
 
 	$preselect_plugin = tsosi_sanitize_plugin_file( tsosi_get_admin_query_arg( 'plugin_file' ) );
 
-	$base_url = admin_url( 'tools.php?page=tso-stack-inspector' );
-	$plugins  = tsosi_get_installed_plugins();
-	$profiles = tsosi_get_all_plugin_profiles();
-	$cleaner  = tsosi_get_options_cleaner_url();
+	$base_url    = admin_url( 'tools.php?page=tso-stack-inspector' );
+	$plugins     = tsosi_get_installed_plugins();
+	$profiles    = tsosi_get_all_plugin_profiles();
+	$cleaner_cta = tsosi_get_options_cleaner_cta();
 
 	$txt_title = tsosi_ui_triple_text(
 		'TSO Stack Inspector',
@@ -123,15 +129,10 @@ function tsosi_admin_render_page() {
 	echo '</h1>';
 	echo '<p class="description">' . esc_html( $txt_intro ) . '</p>';
 
-	tsosi_admin_render_language_switcher( $base_url );
+	tsosi_admin_render_language_switcher( $base_url, $tab );
 
-	if ( '' !== $cleaner ) {
-		$txt_cleaner = tsosi_ui_triple_text(
-			'After uninstalling, clean leftover options and tables with TSO Options & Tables Cleaner.',
-			'Tras desinstalar, limpia opciones y tablas sobrantes con TSO Options & Tables Cleaner.',
-			'Després de desinstal·lar, neteja opcions i taules sobrants amb TSO Options & Tables Cleaner.'
-		);
-		echo '<p><a class="button button-secondary" href="' . esc_url( $cleaner ) . '">' . esc_html( $txt_cleaner ) . '</a></p>';
+	if ( null !== $cleaner_cta ) {
+		echo '<p><a class="button button-secondary" href="' . esc_url( $cleaner_cta['url'] ) . '">' . esc_html( $cleaner_cta['label'] ) . '</a></p>';
 	}
 
 	tsosi_admin_render_cache_bar();
@@ -193,14 +194,19 @@ function tsosi_admin_render_page() {
 	echo esc_html( tsosi_ui_triple_text( 'Clean leftovers in Options Cleaner', 'Limpiar restos en Options Cleaner', 'Netejar restes a Options Cleaner' ) );
 	echo '</a>';
 	if ( ! tsosi_options_cleaner_is_available() ) {
+		$missing_cta = tsosi_get_options_cleaner_cta();
 		echo '<span id="tsosi-cleaner-missing" class="description">';
-		echo esc_html(
-			tsosi_ui_triple_text(
-				'Install/activate TSO Options & Tables Cleaner to remove leftover options and tables after uninstall.',
-				'Instala/activa TSO Options & Tables Cleaner para borrar opciones y tablas sobrantes tras desinstalar.',
-				'Instal·la/activa TSO Options & Tables Cleaner per esborrar opcions i taules sobrants després de desinstal·lar.'
-			)
-		);
+		if ( null !== $missing_cta ) {
+			echo '<a href="' . esc_url( $missing_cta['url'] ) . '">' . esc_html( $missing_cta['label'] ) . '</a>';
+		} else {
+			echo esc_html(
+				tsosi_ui_triple_text(
+					'Install/activate TSO Options & Tables Cleaner to remove leftover options and tables after uninstall.',
+					'Instala/activa TSO Options & Tables Cleaner para borrar opciones y tablas sobrantes tras desinstalar.',
+					'Instal·la/activa TSO Options & Tables Cleaner per esborrar opcions i taules sobrants després de desinstal·lar.'
+				)
+			);
+		}
 		echo '</span>';
 	}
 	echo '</div>';
@@ -218,17 +224,33 @@ function tsosi_admin_render_page() {
 
 /**
  * @param string $base_url Base admin URL.
+ * @param string $tab      Active tab, preserved through the redirect after switching.
  * @return void
  */
-function tsosi_admin_render_language_switcher( $base_url ) {
-	$current = tsosi_get_ui_lang();
+function tsosi_admin_render_language_switcher( $base_url, $tab = '' ) {
+	// The dropdown reflects the user's raw pin (or its absence), not the resolved
+	// language: an unpinned user on a Spanish WordPress profile must still see
+	// "Automatic" selected, not "Español", so switching their WP language later keeps
+	// following it without needing to revisit this screen.
+	$pin = tsosi_get_ui_lang_pin();
+
 	echo '<form method="get" action="' . esc_url( admin_url( 'tools.php' ) ) . '" class="tsosi-lang-form">';
 	echo '<input type="hidden" name="page" value="tso-stack-inspector" />';
+	if ( '' !== $tab ) {
+		echo '<input type="hidden" name="tab" value="' . esc_attr( $tab ) . '" />';
+	}
 	wp_nonce_field( TSOSI_NONCE_FORM );
 	echo '<label for="tsosi-set-lang">' . esc_html( tsosi_ui_triple_text( 'Interface language', 'Idioma de la interfaz', 'Idioma de la interfície' ) ) . '</label> ';
 	echo '<select id="tsosi-set-lang" name="' . esc_attr( TSOSI_ADMIN_QUERY_SET_LANG ) . '">';
-	foreach ( array( 'en' => 'English', 'es' => 'Español', 'ca' => 'Català' ) as $code => $label ) {
-		echo '<option value="' . esc_attr( $code ) . '"' . selected( $current, $code, false ) . '>' . esc_html( $label ) . '</option>';
+	$options = array(
+		'auto' => tsosi_ui_triple_text( 'Automatic', 'Automático', 'Automàtic' ),
+		'en'   => 'English',
+		'es'   => 'Español',
+		'ca'   => 'Català',
+	);
+	foreach ( $options as $code => $label ) {
+		$value = ( 'auto' === $code ) ? 'auto' : $code;
+		echo '<option value="' . esc_attr( $value ) . '"' . selected( '' === $pin ? 'auto' : $pin, $value, false ) . '>' . esc_html( $label ) . '</option>';
 	}
 	echo '</select>';
 	echo '</form>';
@@ -265,17 +287,19 @@ function tsosi_admin_render_tabs( $base_url, $tab ) {
 /**
  * @param array<string,array<string,string>> $plugins  Plugins.
  * @param array<string,array<string,mixed>>  $profiles Profiles.
- * @param string                              $preselect Optional plugin file to preselect.
+ * @param string                             $preselect Optional plugin file to preselect.
  * @return void
  */
 function tsosi_admin_render_plugin_tab( $plugins, $profiles, $preselect = '' ) {
 	echo '<div class="tsosi-panel">';
 	echo '<h2>' . esc_html( tsosi_ui_triple_text( 'Before uninstall', 'Antes de desinstalar', 'Abans de desinstal·lar' ) ) . '</h2>';
-	echo '<p>' . esc_html( tsosi_ui_triple_text(
-		'Select a plugin to scan posts, reusable blocks, widgets, and menus for its shortcodes, blocks, and meta prefixes.',
-		'Selecciona un plugin para escanear entradas, bloques reutilizables, widgets y menús buscando sus shortcodes, bloques y prefijos meta.',
-		'Selecciona un plugin per escanejar entrades, blocs reutilitzables, widgets i menús buscant els seus shortcodes, blocs i prefixos meta.'
-	) ) . '</p>';
+	echo '<p>' . esc_html(
+		tsosi_ui_triple_text(
+			'Select a plugin to scan posts, reusable blocks, widgets, and menus for its shortcodes, blocks, and meta prefixes.',
+			'Selecciona un plugin para escanear entradas, bloques reutilizables, widgets y menús buscando sus shortcodes, bloques y prefijos meta.',
+			'Selecciona un plugin per escanejar entrades, blocs reutilitzables, widgets i menús buscant els seus shortcodes, blocs i prefixos meta.'
+		)
+	) . '</p>';
 
 	echo '<div class="tsosi-form-row">';
 	echo '<label for="tsosi-plugin-file">' . esc_html( tsosi_ui_triple_text( 'Plugin', 'Plugin', 'Plugin' ) ) . '</label>';
@@ -331,21 +355,27 @@ function tsosi_admin_render_shortcode_tab() {
 	echo '<div class="tsosi-panel">';
 	echo '<h2>' . esc_html( tsosi_ui_triple_text( 'Shortcode finder', 'Buscador de shortcodes', 'Cercador de shortcodes' ) ) . '</h2>';
 	echo '<div class="tsosi-tab-help">';
-	echo '<p class="description">' . esc_html( tsosi_ui_triple_text(
-		'Use this when you want to know where a shortcode is still used before removing a plugin or editing content.',
-		'Úsalo cuando quieras saber dónde sigue usándose un shortcode antes de quitar un plugin o editar contenido.',
-		'Fes servir això quan vulguis saber on encara s\'utilitza un shortcode abans de treure un plugin o editar contingut.'
-	) ) . '</p>';
-	echo '<p class="description">' . esc_html( tsosi_ui_triple_text(
-		'The dropdown lists real shortcodes registered on this site by active plugins, the theme, and WordPress core. A long list is normal: many plugins register internal or legacy shortcodes even if you never insert them manually.',
-		'El desplegable lista shortcodes reales registrados en este sitio por plugins activos, el tema y WordPress. Una lista larga es normal: muchos plugins registran shortcodes internos o heredados aunque no los insertes a mano.',
-		'El desplegable llista shortcodes reals registrats en aquest lloc per plugins actius, el tema i el WordPress. Una llista llarga és normal: molts plugins registren shortcodes interns o heretats encara que no els insertis a mà.'
-	) ) . '</p>';
-	echo '<p class="description">' . esc_html( tsosi_ui_triple_text(
-		'Pick one from the dropdown or type the tag without brackets. The scan checks posts, templates, widgets, menus, and wp_options.',
-		'Elige uno del desplegable o escribe la etiqueta sin corchetes. El escaneo revisa entradas, plantillas, widgets, menús y wp_options.',
-		'Tria’n un del desplegable o escriu l\'etiqueta sense claudàtors. L\'escaneig revisa entrades, plantilles, widgets, menús i wp_options.'
-	) ) . '</p>';
+	echo '<p class="description">' . esc_html(
+		tsosi_ui_triple_text(
+			'Use this when you want to know where a shortcode is still used before removing a plugin or editing content.',
+			'Úsalo cuando quieras saber dónde sigue usándose un shortcode antes de quitar un plugin o editar contenido.',
+			'Fes servir això quan vulguis saber on encara s\'utilitza un shortcode abans de treure un plugin o editar contingut.'
+		)
+	) . '</p>';
+	echo '<p class="description">' . esc_html(
+		tsosi_ui_triple_text(
+			'The dropdown lists real shortcodes registered on this site by active plugins, the theme, and WordPress core. A long list is normal: many plugins register internal or legacy shortcodes even if you never insert them manually.',
+			'El desplegable lista shortcodes reales registrados en este sitio por plugins activos, el tema y WordPress. Una lista larga es normal: muchos plugins registran shortcodes internos o heredados aunque no los insertes a mano.',
+			'El desplegable llista shortcodes reals registrats en aquest lloc per plugins actius, el tema i el WordPress. Una llista llarga és normal: molts plugins registren shortcodes interns o heretats encara que no els insertis a mà.'
+		)
+	) . '</p>';
+	echo '<p class="description">' . esc_html(
+		tsosi_ui_triple_text(
+			'Pick one from the dropdown or type the tag without brackets. The scan checks posts, templates, widgets, menus, and wp_options.',
+			'Elige uno del desplegable o escribe la etiqueta sin corchetes. El escaneo revisa entradas, plantillas, widgets, menús y wp_options.',
+			'Tria’n un del desplegable o escriu l\'etiqueta sense claudàtors. L\'escaneig revisa entrades, plantilles, widgets, menús i wp_options.'
+		)
+	) . '</p>';
 	echo '</div>';
 	echo '<div class="tsosi-form-row tsosi-form-row-block">';
 	echo '<label for="tsosi-shortcode-select">' . esc_html( tsosi_ui_triple_text( 'Shortcode tag', 'Etiqueta shortcode', 'Etiqueta shortcode' ) ) . '</label>';
@@ -373,11 +403,13 @@ function tsosi_admin_render_shortcode_tab() {
 		echo '<option value="' . esc_attr( $tag ) . '"></option>';
 	}
 	echo '</datalist>';
-	echo '<p id="tsosi-shortcode-help" class="description tsosi-field-help">' . esc_html( tsosi_ui_triple_text(
-		'Registered shortcodes work right now. Code-only entries were detected in a plugin file but are not active until that plugin runs.',
-		'Los shortcodes registrados funcionan ahora mismo. Las entradas solo en código se detectaron en un plugin pero no están activas hasta que el plugin se ejecute.',
-		'Shortcodes registrats funcionen ara mateix. Entrades només al codi s\'han detectat en un plugin però no són actives fins que el plugin s\'executi.'
-	) ) . '</p>';
+	echo '<p id="tsosi-shortcode-help" class="description tsosi-field-help">' . esc_html(
+		tsosi_ui_triple_text(
+			'Registered shortcodes work right now. Code-only entries were detected in a plugin file but are not active until that plugin runs.',
+			'Los shortcodes registrados funcionan ahora mismo. Las entradas solo en código se detectaron en un plugin pero no están activas hasta que el plugin se ejecute.',
+			'Shortcodes registrats funcionen ara mateix. Entrades només al codi s\'han detectat en un plugin però no són actives fins que el plugin s\'executi.'
+		)
+	) . '</p>';
 	echo '</div>';
 	echo '<button type="button" class="button button-primary tsosi-start-scan" data-mode="shortcode">' . esc_html( tsosi_ui_triple_text( 'Start scan', 'Iniciar escaneo', 'Iniciar escaneig' ) ) . '</button>';
 	echo '</div></div>';
@@ -395,21 +427,27 @@ function tsosi_admin_render_block_tab() {
 	echo '<div class="tsosi-panel">';
 	echo '<h2>' . esc_html( tsosi_ui_triple_text( 'Block finder', 'Buscador de bloques', 'Cercador de blocs' ) ) . '</h2>';
 	echo '<div class="tsosi-tab-help">';
-	echo '<p class="description">' . esc_html( tsosi_ui_triple_text(
-		'Use this to find where a Gutenberg block is inserted before you deactivate a plugin or clean up the site.',
-		'Úsalo para localizar dónde está insertado un bloque de Gutenberg antes de desactivar un plugin o limpiar el sitio.',
-		'Fes servir això per localitzar on està inserit un bloc de Gutenberg abans de desactivar un plugin o netejar el lloc.'
-	) ) . '</p>';
-	echo '<p class="description">' . esc_html( tsosi_ui_triple_text(
-		'The scan searches post content, FSE templates, reusable blocks, widget areas, menus, and serialized options.',
-		'El escaneo busca en el contenido de entradas, plantillas FSE, bloques reutilizables, widgets, menús y opciones serializadas.',
-		'L\'escaneig cerca al contingut de les entrades, plantilles FSE, blocs reutilitzables, widgets, menús i opcions serialitzades.'
-	) ) . '</p>';
-	echo '<p class="description">' . esc_html( tsosi_ui_triple_text(
-		'Pick a block from the dropdown (plugin blocks first) or type a block name manually. Format: namespace/block.',
-		'Elige un bloque del desplegable (primero los de plugins) o escribe uno manualmente. Formato: espacio/nombre.',
-		'Tria un bloc del desplegable (primer els de plugins) o escriu-ne un manualment. Format: espai/nom.'
-	) ) . '</p>';
+	echo '<p class="description">' . esc_html(
+		tsosi_ui_triple_text(
+			'Use this to find where a Gutenberg block is inserted before you deactivate a plugin or clean up the site.',
+			'Úsalo para localizar dónde está insertado un bloque de Gutenberg antes de desactivar un plugin o limpiar el sitio.',
+			'Fes servir això per localitzar on està inserit un bloc de Gutenberg abans de desactivar un plugin o netejar el lloc.'
+		)
+	) . '</p>';
+	echo '<p class="description">' . esc_html(
+		tsosi_ui_triple_text(
+			'The scan searches post content, FSE templates, reusable blocks, widget areas, menus, and serialized options.',
+			'El escaneo busca en el contenido de entradas, plantillas FSE, bloques reutilizables, widgets, menús y opciones serializadas.',
+			'L\'escaneig cerca al contingut de les entrades, plantilles FSE, blocs reutilitzables, widgets, menús i opcions serialitzades.'
+		)
+	) . '</p>';
+	echo '<p class="description">' . esc_html(
+		tsosi_ui_triple_text(
+			'Pick a block from the dropdown (plugin blocks first) or type a block name manually. Format: namespace/block.',
+			'Elige un bloque del desplegable (primero los de plugins) o escribe uno manualmente. Formato: espacio/nombre.',
+			'Tria un bloc del desplegable (primer els de plugins) o escriu-ne un manualment. Format: espai/nom.'
+		)
+	) . '</p>';
 	echo '</div>';
 	echo '<div class="tsosi-form-row tsosi-form-row-block">';
 	echo '<label for="tsosi-block-select">' . esc_html( tsosi_ui_triple_text( 'Block name', 'Nombre del bloque', 'Nom del bloc' ) ) . '</label>';
@@ -437,11 +475,13 @@ function tsosi_admin_render_block_tab() {
 		echo '<option value="' . esc_attr( $block_name ) . '"></option>';
 	}
 	echo '</datalist>';
-	echo '<p id="tsosi-block-help" class="description tsosi-field-help">' . esc_html( tsosi_ui_triple_text(
-		'You can also type any block name if it is not listed.',
-		'También puedes escribir un nombre de bloque si no aparece en la lista.',
-		'També pots escriure un nom de bloc si no surt a la llista.'
-	) ) . '</p>';
+	echo '<p id="tsosi-block-help" class="description tsosi-field-help">' . esc_html(
+		tsosi_ui_triple_text(
+			'You can also type any block name if it is not listed.',
+			'También puedes escribir un nombre de bloque si no aparece en la lista.',
+			'També pots escriure un nom de bloc si no surt a la llista.'
+		)
+	) . '</p>';
 	echo '</div>';
 	echo '<button type="button" class="button button-primary tsosi-start-scan" data-mode="block">' . esc_html( tsosi_ui_triple_text( 'Start scan', 'Iniciar escaneo', 'Iniciar escaneig' ) ) . '</button>';
 	echo '</div></div>';
@@ -455,11 +495,13 @@ function tsosi_admin_render_inventory_tab( $profiles ) {
 	echo '<div class="tsosi-panel">';
 	echo '<h2>' . esc_html( tsosi_ui_triple_text( 'Registered shortcodes', 'Shortcodes registrados', 'Shortcodes registrats' ) ) . '</h2>';
 	$inventory = tsosi_get_registered_shortcode_inventory();
-	echo '<p>' . esc_html( tsosi_ui_triple_text(
-		'Shortcodes currently registered on this site (active plugins, theme, and WordPress core). Many are internal or legacy tags registered by plugins even if you never insert them in content. Use the Shortcode tab to find where each one is used.',
-		'Shortcodes registrados actualmente en este sitio (plugins activos, tema y WordPress). Muchos son etiquetas internas o heredadas aunque no las insertes en el contenido. Usa la pestaña Shortcode para ver dónde se usa cada uno.',
-		'Shortcodes registrats actualment en aquest lloc (plugins actius, tema i WordPress). Molts són etiquetes internes o heretades encara que no les insertis al contingut. Usa la pestanya Shortcode per veure on s\'utilitza cadascun.'
-	) ) . '</p>';
+	echo '<p>' . esc_html(
+		tsosi_ui_triple_text(
+			'Shortcodes currently registered on this site (active plugins, theme, and WordPress core). Many are internal or legacy tags registered by plugins even if you never insert them in content. Use the Shortcode tab to find where each one is used.',
+			'Shortcodes registrados actualmente en este sitio (plugins activos, tema y WordPress). Muchos son etiquetas internas o heredadas aunque no las insertes en el contenido. Usa la pestaña Shortcode para ver dónde se usa cada uno.',
+			'Shortcodes registrats actualment en aquest lloc (plugins actius, tema i WordPress). Molts són etiquetes internes o heretades encara que no les insertis al contingut. Usa la pestanya Shortcode per veure on s\'utilitza cadascun.'
+		)
+	) . '</p>';
 	echo '<ul class="tsosi-tag-list">';
 	foreach ( $inventory as $row ) {
 		echo '<li><code>' . esc_html( (string) $row['tag'] ) . '</code></li>';
@@ -498,7 +540,7 @@ function tsosi_admin_render_inventory_tab( $profiles ) {
 function tsosi_ajax_scan_start() {
 	tsosi_ajax_require_manage_options();
 
-	$mode = tsosi_get_ajax_post_text( 'mode', 'plugin' );
+	$mode  = tsosi_get_ajax_post_text( 'mode', 'plugin' );
 	$query = array( 'mode' => sanitize_key( $mode ) );
 
 	if ( 'plugin' === $mode ) {

@@ -449,6 +449,55 @@ function tsosi_get_uploads_dir() {
 }
 
 /**
+ * Acquire a short-lived, named exclusive lock backed by a file in plugin uploads.
+ *
+ * Guards read-modify-write sequences on shared state (options, backup index files)
+ * against a "lost update": two near-simultaneous requests (a cron tick racing a
+ * manual action, or two batches applied in close succession) each reading the
+ * same value, modifying their own copy, and writing it back -- the last write
+ * silently discards whatever the other request changed.
+ *
+ * @param string $name Lock name (basename only, no path separators).
+ * @return resource|false Lock handle for tsosi_release_lock(), or false if unavailable.
+ */
+function tsosi_acquire_lock( $name ) {
+	$dir = tsosi_get_uploads_dir();
+	if ( ! empty( $dir['error'] ) || '' === $dir['path'] ) {
+		return false;
+	}
+	$name = sanitize_key( (string) $name );
+	if ( '' === $name ) {
+		return false;
+	}
+	$path = trailingslashit( $dir['path'] ) . 'lock-' . $name . '.lock';
+	// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- short-lived lock file guarding a read-modify-write section.
+	$handle = fopen( $path, 'c' );
+	if ( false === $handle ) {
+		return false;
+	}
+	if ( ! flock( $handle, LOCK_EX ) ) {
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- pairs with fopen() above.
+		fclose( $handle );
+		return false;
+	}
+	return $handle;
+}
+
+/**
+ * Release a lock acquired with tsosi_acquire_lock().
+ *
+ * @param resource|false $handle Lock handle.
+ * @return void
+ */
+function tsosi_release_lock( $handle ) {
+	if ( is_resource( $handle ) ) {
+		flock( $handle, LOCK_UN );
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- pairs with fopen() in tsosi_acquire_lock().
+		fclose( $handle );
+	}
+}
+
+/**
  * Deny direct HTTP access to plugin uploads (JSON caches may contain site content).
  *
  * @param string $path Absolute uploads subdirectory path.

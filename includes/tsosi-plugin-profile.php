@@ -117,10 +117,12 @@ function tsosi_profile_collect_php_files( $plugin_dir ) {
 		new RecursiveDirectoryIterator( $plugin_dir, FilesystemIterator::SKIP_DOTS )
 	);
 
+	// Listing paths (without reading contents) is cheap even for large plugins, so we
+	// gather every candidate first and only cap after sorting. RecursiveDirectoryIterator
+	// order is filesystem-dependent; capping while iterating made the same plugin profile
+	// differently across runs/servers and could silently drop the file that matters (e.g.
+	// the main plugin file with add_shortcode()) depending on directory order alone.
 	foreach ( $iter as $file ) {
-		if ( count( $files ) >= TSOSI_PROFILE_MAX_FILES ) {
-			break;
-		}
 		if ( ! $file instanceof SplFileInfo || ! $file->isFile() ) {
 			continue;
 		}
@@ -136,7 +138,35 @@ function tsosi_profile_collect_php_files( $plugin_dir ) {
 		$files[] = $path;
 	}
 
-	return $files;
+	return tsosi_profile_sort_and_cap_files( $files, $plugin_dir, TSOSI_PROFILE_MAX_FILES );
+}
+
+/**
+ * Sort collected plugin files deterministically (shallower paths first, then
+ * alphabetically) and cap the list, so profiling the same plugin twice gives
+ * the same result and root-level files are preferred over deeply nested ones.
+ *
+ * @param string[] $files      Absolute file paths.
+ * @param string   $plugin_dir Plugin root directory.
+ * @param int      $cap        Maximum number of files to keep.
+ * @return string[]
+ */
+function tsosi_profile_sort_and_cap_files( $files, $plugin_dir, $cap ) {
+	$plugin_dir = untrailingslashit( wp_normalize_path( (string) $plugin_dir ) );
+	usort(
+		$files,
+		static function ( $a, $b ) use ( $plugin_dir ) {
+			$rel_a   = ltrim( substr( $a, strlen( $plugin_dir ) ), '/' );
+			$rel_b   = ltrim( substr( $b, strlen( $plugin_dir ) ), '/' );
+			$depth_a = substr_count( $rel_a, '/' );
+			$depth_b = substr_count( $rel_b, '/' );
+			if ( $depth_a !== $depth_b ) {
+				return $depth_a <=> $depth_b;
+			}
+			return strcmp( $rel_a, $rel_b );
+		}
+	);
+	return array_slice( $files, 0, max( 0, (int) $cap ) );
 }
 
 /**
@@ -157,10 +187,9 @@ function tsosi_profile_collect_block_json_files( $plugin_dir ) {
 		new RecursiveDirectoryIterator( $plugin_dir, FilesystemIterator::SKIP_DOTS )
 	);
 
+	// See tsosi_profile_collect_php_files() -- gather all candidates, then sort + cap,
+	// so the result is deterministic instead of depending on filesystem iteration order.
 	foreach ( $iter as $file ) {
-		if ( count( $files ) >= TSOSI_PROFILE_MAX_BLOCK_JSON ) {
-			break;
-		}
 		if ( ! $file instanceof SplFileInfo || ! $file->isFile() ) {
 			continue;
 		}
@@ -176,7 +205,7 @@ function tsosi_profile_collect_block_json_files( $plugin_dir ) {
 		$files[] = $path;
 	}
 
-	return $files;
+	return tsosi_profile_sort_and_cap_files( $files, $plugin_dir, TSOSI_PROFILE_MAX_BLOCK_JSON );
 }
 
 /**
@@ -211,7 +240,7 @@ function tsosi_profile_resolve_block_json_path( $php_file, $json_hint ) {
 	if ( is_file( $json_hint ) ) {
 		return $json_hint;
 	}
-	$base = wp_normalize_path( dirname( $php_file ) );
+	$base       = wp_normalize_path( dirname( $php_file ) );
 	$candidates = array(
 		$base . '/' . ltrim( $json_hint, './' ),
 		$base . '/' . $json_hint,
@@ -345,10 +374,55 @@ function tsosi_profile_read_file( $path ) {
 	$size = filesize( $path );
 	if ( false === $size || $size > TSOSI_PROFILE_MAX_FILE_BYTES ) {
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- bounded admin scan.
-		return (string) file_get_contents( $path, false, null, 0, TSOSI_PROFILE_MAX_FILE_BYTES );
+		$content = (string) file_get_contents( $path, false, null, 0, TSOSI_PROFILE_MAX_FILE_BYTES );
+	} else {
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- bounded admin scan.
+		$content = (string) file_get_contents( $path );
 	}
-	// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- bounded admin scan.
-	return (string) file_get_contents( $path );
+
+	return tsosi_profile_strip_php_comments( $content );
+}
+
+/**
+ * Strip PHP comments (// # and slash-star ... star-slash, including docblocks) from source
+ * before it is regex-scanned for literal shortcode/block/option/meta keys.
+ *
+ * Without this, an *example* key written inside a comment or docblock -- including, very
+ * concretely, this very file's own docblocks documenting the regexes below (e.g.
+ * "e.g. get_option( 'fileorganizer_free_installed' )") -- is indistinguishable from a real
+ * call and gets attributed to whichever plugin happens to contain that comment. A plain
+ * regex comment-stripper is unsafe (it can't tell "//" or a comment-open sequence inside a
+ * string literal from a real comment start), so this uses PHP's own tokenizer, which does.
+ *
+ * @param string $content Raw file contents (may be plain text/JSON, not just PHP).
+ * @return string Content with comment token text blanked out (line breaks preserved).
+ */
+function tsosi_profile_strip_php_comments( $content ) {
+	if ( '' === $content || ! function_exists( 'token_get_all' ) ) {
+		return $content;
+	}
+
+	$tokens = @token_get_all( $content ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- fall back to the original string on any tokenizer failure (e.g. truncated/non-PHP content).
+	if ( ! is_array( $tokens ) ) {
+		return $content;
+	}
+
+	$stripped = '';
+	foreach ( $tokens as $token ) {
+		if ( is_array( $token ) ) {
+			list( $id, $text ) = $token;
+			if ( T_COMMENT === $id || T_DOC_COMMENT === $id ) {
+				// Keep newlines so anything counting/matching across lines is unaffected.
+				$stripped .= str_repeat( "\n", substr_count( $text, "\n" ) );
+				continue;
+			}
+			$stripped .= $text;
+		} else {
+			$stripped .= $token;
+		}
+	}
+
+	return $stripped;
 }
 
 /**
@@ -430,8 +504,10 @@ function tsosi_discover_plugin_blocks( $plugin_file ) {
  */
 function tsosi_get_core_wp_option_key_blocklist() {
 	return array(
+		// General.
 		'active_plugins',
 		'admin_email',
+		'new_admin_email',
 		'blog_charset',
 		'blogdescription',
 		'blogname',
@@ -442,12 +518,15 @@ function tsosi_get_core_wp_option_key_blocklist() {
 		'cron',
 		'date_format',
 		'db_version',
+		'default_category',
 		'default_comment_status',
 		'default_ping_status',
+		'default_pingback_flag',
 		'default_role',
 		'gmt_offset',
 		'home',
 		'html_type',
+		'initial_db_version',
 		'links_updated_date_format',
 		'mailserver_login',
 		'mailserver_pass',
@@ -461,10 +540,15 @@ function tsosi_get_core_wp_option_key_blocklist() {
 		'posts_per_page',
 		'recently_activated',
 		'rewrite_rules',
+		'secret',
+		'show_on_front',
 		'siteurl',
 		'start_of_week',
+		'stylesheet',
+		'stylesheet_root',
 		'tag_base',
 		'template',
+		'template_root',
 		'time_format',
 		'timezone_string',
 		'uninstall_plugins',
@@ -474,6 +558,60 @@ function tsosi_get_core_wp_option_key_blocklist() {
 		'users_can_register',
 		'WPLANG',
 		'wp_user_roles',
+		// Discussion.
+		'avatar_default',
+		'avatar_rating',
+		'close_comments_days_old',
+		'close_comments_for_old_posts',
+		'comment_max_links',
+		'comment_order',
+		'comment_whitelist',
+		'comments_per_page',
+		'default_comments_page',
+		'disallowed_keys',
+		'moderation_keys',
+		'page_comments',
+		'require_name_email',
+		'show_avatars',
+		'thread_comments',
+		'thread_comments_depth',
+		// Media.
+		'image_default_align',
+		'image_default_link_type',
+		'image_default_size',
+		'large_size_h',
+		'large_size_w',
+		'medium_large_size_h',
+		'medium_large_size_w',
+		'medium_size_h',
+		'medium_size_w',
+		'thumbnail_crop',
+		'thumbnail_size_h',
+		'thumbnail_size_w',
+		// Misc core state read-only by convention (never owned by a plugin).
+		'blog_public',
+		'nav_menu_options',
+		'sidebars_widgets',
+		'use_balanceTags',
+		'use_smilies',
+		'use_trackback',
+		'widget_categories',
+		'wp_page_for_privacy_policy',
+	);
+}
+
+/**
+ * Option key prefixes that belong to a shared third-party vendor/licensing scheme rather
+ * than to any single plugin. Some plugin distribution networks (e.g. Softaculous-bundled
+ * "nulled"/reseller installers) inject a common licensing option key into many unrelated
+ * plugins; a plugin's source code genuinely calling get_option() on one of these keys is
+ * not evidence that a *specific other* plugin found on the site is that same plugin.
+ *
+ * @return string[]
+ */
+function tsosi_get_shared_vendor_option_key_prefix_blocklist() {
+	return array(
+		'softaculous_',
 	);
 }
 
@@ -490,6 +628,11 @@ function tsosi_is_blocked_option_key_for_prefix_discovery( $key ) {
 	}
 	if ( in_array( $key, tsosi_get_core_wp_option_key_blocklist(), true ) ) {
 		return true;
+	}
+	foreach ( tsosi_get_shared_vendor_option_key_prefix_blocklist() as $vendor_prefix ) {
+		if ( 0 === strpos( $key, $vendor_prefix ) ) {
+			return true;
+		}
 	}
 	if ( tsosi_is_sensitive_storage_option_name( $key ) ) {
 		return true;
@@ -554,10 +697,22 @@ function tsosi_is_sensitive_storage_option_name( $name ) {
 /**
  * Derive meta/option prefix candidates from a storage key.
  *
- * @param string $key Storage key.
+ * The single-segment fallback (the bare first "word" of the key, e.g. "widget" out of
+ * "widget_text") is only safe when the key itself is the plugin's own folder slug --
+ * there it's inherently plugin-specific. When the key instead comes from scanning the
+ * plugin's source for get_option()/get_post_meta() calls, that first segment is often a
+ * generic English/WordPress word ("widget", "theme", "search", "license"...) that many
+ * unrelated plugins and WordPress core itself also use, so a bare match against it causes
+ * mass false positives (e.g. every "widget_*" core option "matching" a plugin that merely
+ * happens to read one such option). Callers pass $allow_bare_segment = false for anything
+ * discovered from source scanning, and leave it true only for the plugin's own folder slug.
+ *
+ * @param string $key                  Storage key.
+ * @param bool   $allow_bare_segment   Whether the bare first segment alone may become a
+ *                                     prefix candidate. Default true.
  * @return string[]
  */
-function tsosi_profile_prefixes_from_storage_key( $key ) {
+function tsosi_profile_prefixes_from_storage_key( $key, $allow_bare_segment = true ) {
 	$key = sanitize_key( (string) $key );
 	if ( '' === $key ) {
 		return array();
@@ -571,7 +726,7 @@ function tsosi_profile_prefixes_from_storage_key( $key ) {
 
 	$parts    = preg_split( '/[_-]/', $key );
 	$prefixes = array();
-	if ( ! empty( $parts[0] ) && strlen( $parts[0] ) >= 5 ) {
+	if ( $allow_bare_segment && ! empty( $parts[0] ) && strlen( $parts[0] ) >= 5 ) {
 		$prefixes[] = sanitize_key( $parts[0] );
 	}
 	if ( ! empty( $parts[1] ) && strlen( $parts[0] ) >= 2 && strlen( $parts[1] ) >= 2 ) {
@@ -579,6 +734,94 @@ function tsosi_profile_prefixes_from_storage_key( $key ) {
 	}
 	if ( ! empty( $parts[2] ) && strlen( $parts[0] ) >= 2 && strlen( $parts[1] ) >= 2 && strlen( $parts[2] ) >= 2 ) {
 		$prefixes[] = sanitize_key( $parts[0] . '_' . $parts[1] . '_' . $parts[2] );
+	}
+
+	return array_values( array_unique( array_filter( $prefixes ) ) );
+}
+
+/**
+ * Literal heads of a dynamic (concatenated) storage key that must never be trusted as a
+ * plugin-owned prefix on their own, because WordPress core or many unrelated plugins
+ * routinely build a dynamic key from this same root to reference something that isn't
+ * specific to the plugin doing the reading (e.g. "theme_mods_" . $stylesheet is used by
+ * any code reading ANY theme's mods, not just code that owns that data -- this is exactly
+ * the pattern that previously caused Stack Inspector itself to false-match an unrelated
+ * theme's theme_mods).
+ *
+ * @return string[]
+ */
+function tsosi_get_dynamic_prefix_root_blocklist() {
+	return array(
+		'theme_mods',
+		'widget',
+		'sidebars_widgets',
+		'nav_menu',
+		'cron',
+		'transient',
+		'site_transient',
+	);
+}
+
+/**
+ * Whether a literal head extracted from a concatenated storage key ("head" . $var) is a
+ * generic root that must not become a standalone plugin prefix by itself.
+ *
+ * @param string $head Sanitized head, trailing separator already stripped.
+ * @return bool
+ */
+function tsosi_is_dynamic_prefix_root_blocked( $head ) {
+	$head = sanitize_key( (string) $head );
+	if ( '' === $head ) {
+		return true;
+	}
+	foreach ( tsosi_get_dynamic_prefix_root_blocklist() as $blocked_root ) {
+		if ( $head === $blocked_root || 0 === strpos( $head, $blocked_root . '_' ) ) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * Discover literal transient / site-transient keys used by a plugin and translate them
+ * into the wp_options row-name prefixes WordPress actually stores them under
+ * ("_transient_{key}" / "_site_transient_{key}"). A plugin can carry an entire mechanism
+ * (e.g. a fake "license"/"update available" nag) purely through transients, with no
+ * get_option()/update_option() call anywhere in its source -- without this, such a
+ * plugin would have no discoverable option-side footprint at all.
+ *
+ * @param string $plugin_file Plugin basename.
+ * @return string[] Fully-formed wp_options prefixes.
+ */
+function tsosi_discover_plugin_transient_prefixes( $plugin_file ) {
+	$dir   = tsosi_get_plugin_dir( $plugin_file );
+	$files = tsosi_profile_collect_php_files( $dir );
+
+	$entries = array();
+	foreach ( $files as $path ) {
+		$content = tsosi_profile_read_file( $path );
+		if ( '' === $content ) {
+			continue;
+		}
+		// Complete literal transient key only -- same reasoning as the option/meta
+		// regexes above: a dynamically built key isn't one this plugin can be said to own.
+		if ( preg_match_all( "/(?:get|set|delete)_(site_)?transient\s*\(\s*(['\"])([_a-z0-9-]+)\\2\s*[,)]/i", $content, $matches ) ) {
+			foreach ( $matches[3] as $index => $key ) {
+				$entries[] = array(
+					'key'  => sanitize_key( (string) $key ),
+					'site' => isset( $matches[1][ $index ] ) && '' !== $matches[1][ $index ],
+				);
+			}
+		}
+	}
+
+	$prefixes = array();
+	foreach ( $entries as $entry ) {
+		$key = $entry['key'];
+		if ( '' === $key || tsosi_is_blocked_option_key_for_prefix_discovery( $key ) ) {
+			continue;
+		}
+		$prefixes[] = ( $entry['site'] ? '_site_transient_' : '_transient_' ) . $key;
 	}
 
 	return array_values( array_unique( array_filter( $prefixes ) ) );
@@ -599,6 +842,46 @@ function tsosi_is_runtime_analytics_storage_key( $key ) {
 }
 
 /**
+ * Literal postmeta keys established as owned by a write-type call (add/update/delete_post_meta
+ * or register_post_meta()/register_meta()) somewhere in the plugin's own source.
+ *
+ * A bare get_post_meta() call on a literal key is not evidence of ownership: plugins
+ * routinely read ANOTHER plugin's or service's meta to interoperate with it (e.g. reading
+ * Yoast SEO's own "_yoast_wpseo_focuskw" post meta to feed an auto-rename/SEO feature),
+ * and that read-only key belongs to the other plugin, not to the one being scanned.
+ *
+ * @param string[] $files Plugin PHP file paths.
+ * @return array<string,bool> Sanitized keys, as a set (map to true).
+ */
+function tsosi_discover_plugin_meta_write_keys( $files ) {
+	$write_keys = array();
+
+	foreach ( $files as $path ) {
+		$content = tsosi_profile_read_file( $path );
+		if ( '' === $content ) {
+			continue;
+		}
+		if ( preg_match_all( "/(?:update|delete|add)_post_meta\s*\([^,]+,\s*(['\"])([_a-z0-9-]+)\\1\s*[,)]/i", $content, $matches ) ) {
+			foreach ( $matches[2] as $key ) {
+				$write_keys[ sanitize_key( (string) $key ) ] = true;
+			}
+		}
+		if ( preg_match_all( "/(?:update|delete|add)_post_meta\s*\([^,]+,\s*(['\"])([_a-z0-9-]+)\\1\s*\./i", $content, $head_matches ) ) {
+			foreach ( $head_matches[2] as $head ) {
+				$write_keys[ sanitize_key( rtrim( (string) $head, '_-' ) ) ] = true;
+			}
+		}
+		if ( preg_match_all( "/register_(?:post_)?meta\s*\(\s*['\"][^'\"]*['\"]\s*,\s*(['\"])([_a-z0-9-]+)\\1/i", $content, $register_matches ) ) {
+			foreach ( $register_matches[2] as $key ) {
+				$write_keys[ sanitize_key( (string) $key ) ] = true;
+			}
+		}
+	}
+
+	return $write_keys;
+}
+
+/**
  * Guess postmeta / option prefixes referenced by a plugin.
  *
  * @param string $plugin_file Plugin basename.
@@ -609,14 +892,45 @@ function tsosi_discover_plugin_meta_prefixes( $plugin_file ) {
 	$files = tsosi_profile_collect_php_files( $dir );
 	$keys  = array();
 
+	$write_keys = tsosi_discover_plugin_meta_write_keys( $files );
+	$keys       = array_merge( $keys, array_keys( $write_keys ) );
+
 	foreach ( $files as $path ) {
 		$content = tsosi_profile_read_file( $path );
 		if ( '' === $content ) {
 			continue;
 		}
-		if ( preg_match_all( "/(?:get|update|delete|add)_post_meta\s*\([^,]+,\s*['\"]([_a-z0-9-]+)/i", $content, $matches ) ) {
-			foreach ( $matches[1] as $key ) {
-				$keys[] = sanitize_key( (string) $key );
+		// Require a complete literal key -- immediately closed by the same quote and
+		// followed by "," or ")" -- e.g. get_post_meta( $id, 'myplugin_option', true ).
+		// A get_post_meta() match only counts when the same key is also established by a
+		// write call / register_meta() above -- see tsosi_discover_plugin_meta_write_keys().
+		if ( preg_match_all( "/(get|update|delete|add)_post_meta\s*\([^,]+,\s*(['\"])([_a-z0-9-]+)\\2\s*[,)]/i", $content, $matches ) ) {
+			foreach ( $matches[3] as $index => $key ) {
+				$key = sanitize_key( (string) $key );
+				if ( 'get' === strtolower( $matches[1][ $index ] ) && ! isset( $write_keys[ $key ] ) ) {
+					continue;
+				}
+				$keys[] = $key;
+			}
+		}
+		// Literal *head* of a concatenated key -- e.g.
+		// update_post_meta( $id, 'myplugin_field_' . $suffix, $val ). The suffix is
+		// dynamic, but the literal head is still a real, plugin-authored fragment, so it
+		// is kept as an already-compound prefix candidate -- guarded by
+		// tsosi_is_dynamic_prefix_root_blocked() against generic roots (e.g. a plugin
+		// that merely reads "theme_mods_" . $stylesheet for some other theme), and, for
+		// get_post_meta(), by the same write-evidence requirement as above.
+		if ( preg_match_all( "/(get|update|delete|add)_post_meta\s*\([^,]+,\s*(['\"])([_a-z0-9-]+)\\2\s*\./i", $content, $head_matches ) ) {
+			foreach ( $head_matches[3] as $index => $head ) {
+				$head = sanitize_key( rtrim( (string) $head, '_-' ) );
+				if ( 'get' === strtolower( $head_matches[1][ $index ] ) && ! isset( $write_keys[ $head ] ) ) {
+					continue;
+				}
+				if ( strlen( $head ) >= 6 && false !== strpos( $head, '_' )
+					&& ! tsosi_is_dynamic_prefix_root_blocked( $head )
+				) {
+					$keys[] = $head;
+				}
 			}
 		}
 	}
@@ -626,12 +940,58 @@ function tsosi_discover_plugin_meta_prefixes( $plugin_file ) {
 		if ( tsosi_is_runtime_analytics_storage_key( $key ) ) {
 			continue;
 		}
-		$prefixes = array_merge( $prefixes, tsosi_profile_prefixes_from_storage_key( $key ) );
+		// $allow_bare_segment = false: a bare first word from scanned source ("view" out
+		// of "view_count") is too generic to trust as a standalone prefix -- see the
+		// tsosi_profile_prefixes_from_storage_key() docblock.
+		$prefixes = array_merge( $prefixes, tsosi_profile_prefixes_from_storage_key( $key, false ) );
 	}
 
 	$prefixes = array_values( array_unique( array_filter( $prefixes ) ) );
 	sort( $prefixes );
 	return $prefixes;
+}
+
+/**
+ * Literal wp_options keys established as owned by a write-type call (add/update/delete_option
+ * or register_setting()) somewhere in the plugin's own source.
+ *
+ * A bare get_option() call on a literal key is not evidence of ownership: plugins routinely
+ * read ANOTHER plugin's option purely to detect or interoperate with it (e.g. reading
+ * "jetpack_active_modules" to decide whether to defer to Jetpack's own sitemap, or reading
+ * "meowapps_hide_meowapps" to detect that plugin), and that read-only key belongs to the
+ * other plugin, not to the one being scanned. register_setting() is included because the
+ * Settings API persists the option via options.php without a literal update_option() call
+ * anywhere in the plugin's own code.
+ *
+ * @param string[] $files Plugin PHP file paths.
+ * @return array<string,bool> Sanitized keys, as a set (map to true).
+ */
+function tsosi_discover_plugin_option_write_keys( $files ) {
+	$write_keys = array();
+
+	foreach ( $files as $path ) {
+		$content = tsosi_profile_read_file( $path );
+		if ( '' === $content ) {
+			continue;
+		}
+		if ( preg_match_all( "/(?:update|delete|add)_option\s*\(\s*(['\"])([_a-z0-9-]+)\\1\s*[,)]/i", $content, $matches ) ) {
+			foreach ( $matches[2] as $key ) {
+				$write_keys[ sanitize_key( (string) $key ) ] = true;
+			}
+		}
+		if ( preg_match_all( "/(?:update|delete|add)_option\s*\(\s*(['\"])([_a-z0-9-]+)\\1\s*\./i", $content, $head_matches ) ) {
+			foreach ( $head_matches[2] as $head ) {
+				$write_keys[ sanitize_key( rtrim( (string) $head, '_-' ) ) ] = true;
+			}
+		}
+		if ( preg_match_all( "/register_setting\s*\(\s*['\"][^'\"]*['\"]\s*,\s*(['\"])([_a-z0-9-]+)\\1/i", $content, $register_matches ) ) {
+			foreach ( $register_matches[2] as $key ) {
+				$write_keys[ sanitize_key( (string) $key ) ] = true;
+			}
+		}
+	}
+
+	return $write_keys;
 }
 
 /**
@@ -645,17 +1005,60 @@ function tsosi_discover_plugin_option_prefixes( $plugin_file ) {
 	$files = tsosi_profile_collect_php_files( $dir );
 	$keys  = array();
 
+	$write_keys = tsosi_discover_plugin_option_write_keys( $files );
+	$keys       = array_merge( $keys, array_keys( $write_keys ) );
+
 	foreach ( $files as $path ) {
 		$content = tsosi_profile_read_file( $path );
 		if ( '' === $content ) {
 			continue;
 		}
-		if ( preg_match_all( "/(?:get|update|delete|add)_option\s*\(\s*['\"]([_a-z0-9-]+)/i", $content, $matches ) ) {
-			foreach ( $matches[1] as $key ) {
-				$keys[] = sanitize_key( (string) $key );
+		// Require a complete literal key -- immediately closed by the same quote and
+		// followed by "," or ")" -- e.g. get_option( 'fileorganizer_free_installed' ).
+		// A get_option() match only counts when the same key is also established by a
+		// write call / register_setting() above -- see
+		// tsosi_discover_plugin_option_write_keys() -- otherwise a plugin that merely
+		// reads another plugin's option (e.g. to detect it) would be credited with data
+		// it does not own.
+		if ( preg_match_all( "/(get|update|delete|add)_option\s*\(\s*(['\"])([_a-z0-9-]+)\\2\s*[,)]/i", $content, $matches ) ) {
+			foreach ( $matches[3] as $index => $key ) {
+				$key = sanitize_key( (string) $key );
+				if ( 'get' === strtolower( $matches[1][ $index ] ) && ! isset( $write_keys[ $key ] ) ) {
+					continue;
+				}
+				$keys[] = $key;
+			}
+		}
+		// Literal *head* of a concatenated key -- e.g.
+		// update_option( 'fileorganizer_version_' . ( $pro ? 'pro' : 'free' ) . '_nag', $v ).
+		// The suffix is dynamic, but the literal head is still a real, plugin-authored
+		// fragment, so it is kept as an already-compound prefix candidate. This must NOT
+		// swallow "'theme_mods_' . $stylesheet" (a concatenation this plugin merely
+		// builds to READ another theme's data, not a fixed key it OWNS) -- guarded by
+		// tsosi_is_dynamic_prefix_root_blocked() against exactly that kind of generic,
+		// core-owned dynamic root -- and, for get_option(), by the same write-evidence
+		// requirement as above.
+		if ( preg_match_all( "/(get|update|delete|add)_option\s*\(\s*(['\"])([_a-z0-9-]+)\\2\s*\./i", $content, $head_matches ) ) {
+			foreach ( $head_matches[3] as $index => $head ) {
+				$head = sanitize_key( rtrim( (string) $head, '_-' ) );
+				if ( 'get' === strtolower( $head_matches[1][ $index ] ) && ! isset( $write_keys[ $head ] ) ) {
+					continue;
+				}
+				if ( strlen( $head ) >= 6 && false !== strpos( $head, '_' )
+					&& ! tsosi_is_dynamic_prefix_root_blocked( $head )
+				) {
+					$keys[] = $head;
+				}
 			}
 		}
 	}
+
+	// Transient / site-transient literal keys are stored in wp_options under a
+	// "_transient_" / "_site_transient_" prefix, so they need that prefix baked in to
+	// ever match a real row -- see tsosi_discover_plugin_transient_prefixes().
+	$transient_prefixes = tsosi_discover_plugin_transient_prefixes( $plugin_file );
+
+	$source_key_count = count( $keys );
 
 	$folder = tsosi_get_plugin_folder_raw( $plugin_file );
 	if ( '' !== $folder ) {
@@ -663,16 +1066,78 @@ function tsosi_discover_plugin_option_prefixes( $plugin_file ) {
 	}
 
 	$prefixes = array();
-	foreach ( $keys as $key ) {
+	foreach ( $keys as $index => $key ) {
 		if ( tsosi_is_blocked_option_key_for_prefix_discovery( $key ) ) {
 			continue;
 		}
-		$prefixes = array_merge( $prefixes, tsosi_profile_prefixes_from_storage_key( $key ) );
+		// The plugin's own folder slug (appended after $source_key_count) is always
+		// plugin-specific, so its bare first segment is safe to trust; a bare first
+		// segment merely read from a get_option()/update_option() call elsewhere in the
+		// source is not -- see the tsosi_profile_prefixes_from_storage_key() docblock.
+		$allow_bare_segment = $index >= $source_key_count;
+		$prefixes           = array_merge( $prefixes, tsosi_profile_prefixes_from_storage_key( $key, $allow_bare_segment ) );
 	}
+
+	$prefixes = array_merge( $prefixes, $transient_prefixes );
 
 	$prefixes = array_values( array_unique( array_filter( $prefixes ) ) );
 	sort( $prefixes );
 	return $prefixes;
+}
+
+/**
+ * Discover WP_Widget id_base(s) registered by this plugin: find register_widget() calls,
+ * then read the referenced class's own parent::__construct( 'id_base', ... ) call.
+ *
+ * A native widget's storage key is 'widget_{id_base}' and its sidebar instance ids are
+ * '{id_base}-N' -- neither has to share a single word with the plugin's folder slug or
+ * any of its get_option()/get_post_meta() calls (a plugin can register_widget() without
+ * ever calling get_option() itself). Without this, such a plugin has no discoverable
+ * option/meta prefix at all and a scan can never find it in an active sidebar, even
+ * though it plainly is one.
+ *
+ * @param string $plugin_file Plugin basename.
+ * @return string[] Sanitized id_base values.
+ */
+function tsosi_discover_plugin_widget_id_bases( $plugin_file ) {
+	$dir   = tsosi_get_plugin_dir( $plugin_file );
+	$files = tsosi_profile_collect_php_files( $dir );
+
+	$class_names = array();
+	$sources     = array();
+	foreach ( $files as $path ) {
+		$content = tsosi_profile_read_file( $path );
+		if ( '' === $content ) {
+			continue;
+		}
+		$sources[] = $content;
+		if ( preg_match_all( "/register_widget\s*\(\s*(?:new\s+)?['\"]?([A-Za-z_][A-Za-z0-9_]*)/", $content, $matches ) ) {
+			foreach ( $matches[1] as $class_name ) {
+				$class_names[] = $class_name;
+			}
+		}
+	}
+	$class_names = array_values( array_unique( array_filter( $class_names ) ) );
+	if ( empty( $class_names ) ) {
+		return array();
+	}
+
+	$id_bases = array();
+	foreach ( $sources as $content ) {
+		foreach ( $class_names as $class_name ) {
+			// Bounded window after the class declaration so an unrelated class defined
+			// later in the same file can't be mistaken for this one's constructor.
+			if ( preg_match(
+				'/class\s+' . preg_quote( $class_name, '/' ) . '\b.{0,8000}?parent::__construct\s*\(\s*[\'"]([a-z0-9_-]+)[\'"]/is',
+				$content,
+				$class_match
+			) ) {
+				$id_bases[] = sanitize_key( $class_match[1] );
+			}
+		}
+	}
+
+	return array_values( array_unique( array_filter( $id_bases ) ) );
 }
 
 /**
@@ -694,15 +1159,20 @@ function tsosi_build_plugin_profile( $plugin_file ) {
 			'option_prefixes' => array(),
 		);
 	}
-	$plugins     = tsosi_get_installed_plugins();
-	$header      = isset( $plugins[ $plugin_file ] ) ? $plugins[ $plugin_file ] : array();
-	$name        = isset( $header['Name'] ) ? (string) $header['Name'] : $plugin_file;
-	$plugin_dir  = tsosi_get_plugin_dir( $plugin_file );
+	$plugins    = tsosi_get_installed_plugins();
+	$header     = isset( $plugins[ $plugin_file ] ) ? $plugins[ $plugin_file ] : array();
+	$name       = isset( $header['Name'] ) ? (string) $header['Name'] : $plugin_file;
+	$plugin_dir = tsosi_get_plugin_dir( $plugin_file );
 
 	$shortcodes = tsosi_discover_plugin_shortcodes( $plugin_file );
 	$blocks     = tsosi_discover_plugin_blocks( $plugin_file );
 	$prefixes   = tsosi_discover_plugin_meta_prefixes( $plugin_file );
 	$opt_prefix = tsosi_discover_plugin_option_prefixes( $plugin_file );
+
+	// A widget's own id_base is exact and plugin-specific (pulled straight from its own
+	// constructor call), so it's always safe to add directly -- no genericity concern
+	// like the bare-segment fallback above.
+	$opt_prefix = array_merge( $opt_prefix, tsosi_discover_plugin_widget_id_bases( $plugin_file ) );
 
 	if ( tsosi_is_plugin_active_file( $plugin_file ) ) {
 		$shortcodes = array_values( array_unique( array_merge( $shortcodes, tsosi_discover_runtime_shortcodes_for_plugin( $plugin_dir ) ) ) );

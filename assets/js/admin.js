@@ -93,6 +93,18 @@
 		}
 	}
 
+	// A row counts as "content" (currently visible/active use) when it's a shortcode or
+	// block still in post content, OR an active widget instance placed in a live sidebar
+	// (source_type 'widget' -- see tsosi_scan_active_widget_instances() /
+	// tsosi_scan_risk_row_is_active_widget() in tsosi-scan-risk.php). Keep this in sync
+	// with assessRiskClient() and the server-side risk assessment: the "Show content
+	// matches only" button on a "danger" banner must actually surface the row that
+	// caused that banner, not hide it.
+	function isContentBucketRow(row) {
+		var matchType = String(row.match_type || row.source_type || '');
+		return matchType === 'shortcode' || matchType === 'block' || String(row.source_type || '') === 'widget';
+	}
+
 	function getFilteredResults() {
 		var text = (qs('#tsosi-filter-results') || {}).value || '';
 		var type = (qs('#tsosi-filter-type') || {}).value || '';
@@ -103,10 +115,10 @@
 			if (type && matchType !== type && String(row.source_type || '') !== type) {
 				return false;
 			}
-			if (bucket === 'content' && matchType !== 'shortcode' && matchType !== 'block') {
+			if (bucket === 'content' && !isContentBucketRow(row)) {
 				return false;
 			}
-			if (bucket === 'data' && (matchType === 'shortcode' || matchType === 'block')) {
+			if (bucket === 'data' && isContentBucketRow(row)) {
 				return false;
 			}
 			if (isIgnoredValue(row.match_value)) {
@@ -261,14 +273,27 @@
 		return data;
 	}
 
+	// Cap on how many items of one needle category (shortcodes, blocks, meta/option
+	// prefixes) are spelled out inline in the scan-progress summary. A plugin like
+	// Jetpack can have 80+ signatures, and dumping all of them into one unbroken line of
+	// running text makes that line unreadable without adding any information the
+	// "Discovered signatures" table (above the scan panel) doesn't already show in full.
+	var TSOSI_NEEDLE_SUMMARY_CAP = 12;
+
 	function formatNeedles(needles) {
 		if (!needles) {
 			return '—';
 		}
 		var parts = [];
 		['shortcodes', 'blocks', 'meta_prefixes', 'option_prefixes'].forEach(function (key) {
-			if (needles[key] && needles[key].length) {
-				parts.push(key.replace('_prefixes', '') + ': ' + needles[key].join(', '));
+			var list = needles[key];
+			if (list && list.length) {
+				var shown = list.slice(0, TSOSI_NEEDLE_SUMMARY_CAP).join(', ');
+				var remaining = list.length - TSOSI_NEEDLE_SUMMARY_CAP;
+				if (remaining > 0) {
+					shown += ' ' + (i18n.moreCount || '+%1$s more').replace('%1$s', remaining);
+				}
+				parts.push(key.replace('_prefixes', '') + ': ' + shown);
 			}
 		});
 		return parts.length ? parts.join(' | ') : '—';
@@ -276,6 +301,12 @@
 
 	function csvEscape(value) {
 		var str = String(value == null ? '' : value);
+		// Guard against CSV/formula injection: a cell starting with =, +, -, or @ can be
+		// read as a formula by Excel/Sheets. Content here can include post titles or other
+		// text from any author able to publish content, so treat it as untrusted on export.
+		if (/^[=+\-@]/.test(str)) {
+			str = "'" + str;
+		}
 		if (/[",\n\r]/.test(str)) {
 			return '"' + str.replace(/"/g, '""') + '"';
 		}
@@ -298,7 +329,9 @@
 
 	function exportCsv() {
 		var headers = cfg.csvHeaders || ['Location', 'Type', 'Match', 'Context', 'Edit URL'];
-		var rows = allScanResults.map(function (row) {
+		// Export what's currently on screen (active search/type/bucket filters and the
+		// ignore list applied), not every raw match -- see lastScanResults above.
+		var rows = lastScanResults.map(function (row) {
 			return [
 				locationLabel(row),
 				row.match_type || '',
@@ -331,7 +364,9 @@
 			'table{width:100%;border-collapse:collapse;font-size:13px;}' +
 			'th,td{border:1px solid #dcdcde;padding:8px 10px;text-align:left;}';
 
-		var exportRows = allScanResults.length ? allScanResults : lastScanResults;
+		// Match exportCsv(): the printable report should reflect the filtered/ignore-list
+		// view the admin is looking at, not the raw unfiltered result set.
+		var exportRows = lastScanResults;
 		if (!exportRows.length) {
 			rowsHtml = '<tr><td colspan="5">' + escapeHtml(i18n.noResults || 'No usage found.') + '</td></tr>';
 		} else {
@@ -408,26 +443,32 @@
 		}
 		el.hidden = false;
 		el.className = 'tsosi-risk-banner tsosi-risk-' + String(risk.level);
-		var html =
+
+		// Main column (label/help/CTA) and the "before you uninstall" checklist are built
+		// separately and laid out side by side (CSS), so the checklist no longer stacks
+		// below the CTA and inflates the banner's height.
+		var mainHtml =
 			'<strong>' + escapeHtml(risk.label || '') + '</strong>' +
 			(risk.help ? '<span class="tsosi-risk-help">' + escapeHtml(risk.help) + '</span>' : '');
 
 		var cleanerUrl = meta.cleaner_url || '';
 		var cleanerAvailable = meta.cleaner_available;
 		if (cleanerAvailable && cleanerUrl && (risk.level === 'safe' || risk.level === 'review')) {
-			html += '<p class="tsosi-risk-cta"><a class="button button-primary" href="' + escapeAttr(cleanerUrl) + '">' +
+			mainHtml += '<p class="tsosi-risk-cta"><a class="button button-primary" href="' + escapeAttr(cleanerUrl) + '">' +
 				escapeHtml(i18n.cleanerCta || 'Clean leftovers in Options Cleaner') + '</a></p>';
 		} else if (!cleanerAvailable && (risk.level === 'safe' || risk.level === 'review')) {
-			html += '<p class="tsosi-risk-help">' + escapeHtml(i18n.cleanerMissing || '') + '</p>';
+			mainHtml += '<p class="tsosi-risk-help">' + escapeHtml(i18n.cleanerMissing || '') + '</p>';
 		}
 
 		if (risk.level === 'danger') {
-			html += '<p class="tsosi-risk-cta"><button type="button" class="button" id="tsosi-risk-filter-content">' +
+			mainHtml += '<p class="tsosi-risk-cta"><button type="button" class="button" id="tsosi-risk-filter-content">' +
 				escapeHtml(i18n.filterContentOnly || 'Show content matches only') + '</button></p>';
 		} else if (risk.level === 'review') {
-			html += '<p class="tsosi-risk-cta"><button type="button" class="button" id="tsosi-risk-filter-data">' +
+			mainHtml += '<p class="tsosi-risk-cta"><button type="button" class="button" id="tsosi-risk-filter-data">' +
 				escapeHtml(i18n.filterDataOnly || 'Show data matches only') + '</button></p>';
 		}
+
+		var html = '<div class="tsosi-risk-main">' + mainHtml + '</div>';
 
 		if (risk.level === 'danger' || risk.level === 'review') {
 			html += '<div class="tsosi-checklist"><p><strong>' + escapeHtml(i18n.checklistTitle || 'Before you uninstall') + '</strong></p><ol>';
@@ -484,9 +525,12 @@
 	function assessRiskClient(results) {
 		var content = 0;
 		var data = 0;
+		// Mirrors the server-side tsosi_scan_risk_row_is_active_widget() check in
+		// tsosi-scan-risk.php, and shares isContentBucketRow() with getFilteredResults()
+		// so the "Show content matches only" button always surfaces whatever caused the
+		// risk banner in the first place.
 		(results || []).forEach(function (row) {
-			var type = String(row.match_type || row.source_type || '');
-			if (type === 'shortcode' || type === 'block') {
+			if (isContentBucketRow(row)) {
 				content += 1;
 			} else {
 				data += 1;
@@ -1126,7 +1170,14 @@
 					out += '<tr><td>' + escapeHtml(row.object_label || row.source_type || '') + '</td><td>' +
 						escapeHtml(row.match_type || '') + '</td><td><code>' + escapeHtml(row.match_value || '') + '</code></td></tr>';
 				});
-				out += '</tbody></table></div>';
+				out += '</tbody></table>';
+				// The stat tile above shows the true, uncapped count (summary.added /
+				// summary.removed) -- without this note, a diff with e.g. 150 matches showed
+				// "150" in the tile but silently only 100 rows in the table.
+				if (rows.length > 100) {
+					out += '<p class="description">' + escapeHtml((i18n.diffCapped || '(Showing the first 100 of %1$s.)').replace('%1$s', rows.length)) + '</p>';
+				}
+				out += '</div>';
 				return out;
 			}
 
@@ -1137,14 +1188,26 @@
 		});
 	}
 
-	function riskBadge(level) {
+	// needlesEmpty distinguishes "scanned and found nothing" (a real "safe" result) from
+	// "had no shortcodes/blocks/meta/option prefixes to search for in the first place"
+	// (the plugin was never actually checked -- tsosi_audit_inactive_plugins() in
+	// tsosi-scan-risk.php sets risk_level to 'safe' in both cases, since there's nothing
+	// found either way, but showing the same green "Safe" pill for both would let a user
+	// delete an unidentifiable plugin thinking it was verified clean). rowTitle, when
+	// given, becomes a title attribute carrying the exact server-computed risk_label.
+	function riskBadge(level, needlesEmpty, rowTitle) {
 		var label = i18n.riskSafe || 'Safe';
+		var cssLevel = level || 'safe';
 		if (level === 'danger') {
 			label = i18n.riskDanger || 'Risk';
 		} else if (level === 'review') {
 			label = i18n.riskReview || 'Review';
+		} else if (needlesEmpty) {
+			label = i18n.riskUnknown || 'Not checked';
+			cssLevel = 'unknown';
 		}
-		return '<span class="tsosi-risk-pill tsosi-risk-' + escapeAttr(level || 'safe') + '">' + escapeHtml(label) + '</span>';
+		var titleAttr = rowTitle ? ' title="' + escapeAttr(rowTitle) + '"' : '';
+		return '<span class="tsosi-risk-pill tsosi-risk-' + escapeAttr(cssLevel) + '"' + titleAttr + '>' + escapeHtml(label) + '</span>';
 	}
 
 	function runInactiveAudit() {
@@ -1162,10 +1225,14 @@
 			exportBtn.hidden = true;
 		}
 
-		function renderAudit(rows) {
+		function renderAudit(rows, capped) {
 			lastInactiveRows = rows || [];
 			if (status) {
-				status.textContent = i18n.auditDone || 'Audit complete.';
+				// tsosi_audit_inactive_plugins() (tsosi-scan-risk.php) silently stops after
+				// the first 60 inactive plugins ($count > 60) and returns that as `capped`.
+				// Without surfacing it, "Audit complete." reads as exhaustive on a site with
+				// more than 60 inactive plugins, when some were never checked at all.
+				status.textContent = (i18n.auditDone || 'Audit complete.') + (capped ? ' ' + (i18n.auditCapped || '') : '');
 			}
 			if (!box) {
 				return;
@@ -1187,7 +1254,7 @@
 					'<td>' + escapeHtml(String(row.match_count || 0)) +
 					(row.content || row.data ? ' <span class="description">(' + escapeHtml(String(row.content || 0)) + ' content / ' + escapeHtml(String(row.data || 0)) + ' data)</span>' : '') +
 					'</td>' +
-					'<td>' + riskBadge(row.risk_level) + '</td>' +
+					'<td>' + riskBadge(row.risk_level, row.needles_empty, row.risk_label) + '</td>' +
 					'<td><a class="button button-small" href="' + escapeAttr(row.scan_url || '#') + '">' +
 					escapeHtml(i18n.auditOpenScan || 'Open scan') + '</a></td>' +
 					'</tr>';
@@ -1224,7 +1291,10 @@
 				window.alert(msg);
 				return;
 			}
-			renderAudit((payload.data && payload.data.rows) ? payload.data.rows : []);
+			renderAudit(
+				(payload.data && payload.data.rows) ? payload.data.rows : [],
+				!!(payload.data && payload.data.capped)
+			);
 		}).catch(function (err) {
 			if (btn) {
 				btn.disabled = false;
@@ -1236,10 +1306,14 @@
 	}
 
 	function exportInactiveCsv() {
+		// risk_label carries the precise server-computed wording (e.g. "No signatures
+		// detected" vs "Likely safe to uninstall") -- exporting the coarse risk_level
+		// alone would flatten both into the same "safe" text, the same ambiguity fixed
+		// in the on-screen badge via riskBadge()'s needlesEmpty/title handling.
 		var rows = (lastInactiveRows || []).map(function (row) {
-			return [row.name || '', row.plugin_file || '', row.match_count || 0, row.content || 0, row.data || 0, row.risk_level || ''];
+			return [row.name || '', row.plugin_file || '', row.match_count || 0, row.content || 0, row.data || 0, row.risk_level || '', row.risk_label || ''];
 		});
-		downloadCsv('stack-inspector-inactive-' + new Date().toISOString().slice(0, 10) + '.csv', ['Plugin', 'File', 'Matches', 'Content', 'Data', 'Risk'], rows);
+		downloadCsv('stack-inspector-inactive-' + new Date().toISOString().slice(0, 10) + '.csv', ['Plugin', 'File', 'Matches', 'Content', 'Data', 'Risk', 'Risk detail'], rows);
 	}
 
 	function refreshProfiles() {
@@ -1264,10 +1338,17 @@
 		if (!list || !profile) {
 			return;
 		}
+		// tsosi_build_theme_profile() (tsosi-scan-extended.php) always includes an
+		// option_prefixes entry for "theme_mods_{stylesheet}" -- the scan searches for it
+		// unconditionally, regardless of the "include_theme_mods" setting (see
+		// tsosi_scan_needles_want_theme_mods()) -- so omitting it here made a theme with
+		// no shortcodes/blocks/meta show an all-dash "nothing to search for" preview even
+		// though the scan still checks (and can match) theme_mods.
 		list.innerHTML =
 			'<li>' + escapeHtml(i18n.themeShortcodes || 'Shortcodes') + ': <code>' + escapeHtml(joinOrDash(profile.shortcodes)) + '</code></li>' +
 			'<li>' + escapeHtml(i18n.themeBlocks || 'Blocks') + ': <code>' + escapeHtml(joinOrDash(profile.blocks)) + '</code></li>' +
-			'<li>' + escapeHtml(i18n.themeMeta || 'Meta prefixes') + ': <code>' + escapeHtml(joinOrDash(profile.meta_prefixes)) + '</code></li>';
+			'<li>' + escapeHtml(i18n.themeMeta || 'Meta prefixes') + ': <code>' + escapeHtml(joinOrDash(profile.meta_prefixes)) + '</code></li>' +
+			'<li>' + escapeHtml(i18n.themeOption || 'Option prefixes') + ': <code>' + escapeHtml(joinOrDash(profile.option_prefixes)) + '</code></li>';
 	}
 
 	function loadThemeProfile() {

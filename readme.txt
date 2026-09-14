@@ -36,25 +36,29 @@ Scan posts, pages, custom post types, reusable blocks, Site Editor templates, wi
 * **Compare plugins** — shared vs exclusive signatures before migrations
 * **Inventory** — list registered shortcodes and discovered plugin signatures
 * **Scan history** — limited, auto-pruned, with delete/clear
-* **Export CSV / Print PDF** — download scan results or open a printable report after a scan
+* **Export CSV / Print PDF** — download scan results, orphans, or inactive-plugin audits as CSV, or open a printable report after a scan
 * **Refresh signatures** — rebuild the cached plugin profile without waiting 24 hours
 * **Options Cleaner link** — jump to TSO Options & Tables Cleaner when installed to remove leftover options and tables after uninstall
 * **Site index** — built in the background when you open the admin screen (or when you scan); reused for faster scans and audits
+* **Background scan** — optional checkbox to keep a large scan running via WP-Cron after you close the admin tab; reopen the screen later to see the finished results
 * **Ignore list** — hide noisy shortcodes, blocks, or meta/option keys from results
 * **Grouped results** — scan hits grouped by location, with copy-tag and a pre-uninstall checklist
 * **Orphans → Replace** — jump from an orphan tag to the Replace tab already filled in
-* **Export CSV** — scan results, orphans, and inactive-plugin audits
 * **Admin UI languages** — English, Spanish, and Catalan in the Tools screen; community translations via translate.wordpress.org after publication
 
 **How it works**
 
 The plugin reads your content and widget options locally. It does not send data to external services. Plugin signatures (shortcodes, blocks, meta prefixes) are discovered by scanning plugin PHP sources and cached for 24 hours. The site content index is stored under uploads and rebuilt when content or settings change.
 
+**Multisite**
+
+Works on WordPress Multisite: scans, caches, and settings are per-site. Uninstalling from the network admin cleans up every site in the network, not just the main site.
+
 **Limitations**
 
 * Static code scan may miss dynamically registered shortcodes or blocks
 * Meta prefix detection is heuristic; always review results before uninstalling
-* Very large sites run scans in batches; keep the admin tab open until completion
+* Very large sites run scans in batches; tick **Background scan** to let a long scan keep going via WP-Cron after you close the tab, or keep the tab open otherwise
 
 == Installation ==
 
@@ -92,6 +96,13 @@ TSO Stack Inspector stores only:
 * Replace backup index in `wp_options` (`tso_stack_inspector_replace_backups`, ~48h retention)
 
 No data is transmitted to external servers. Scans run only when an administrator starts them from Tools → TSO Stack Inspector.
+
+== Screenshots ==
+
+1. Shortcode scan results grouped by location, ready to review before uninstalling a plugin.
+2. Risk verdict banner — a clear safe / review / risk summary shown after a scan.
+3. Inactive plugins audit — see at a glance which deactivated plugins still leave shortcodes, blocks, options, or meta behind.
+4. Scan settings — background scan, history size limit, and ignore list.
 
 == Changelog ==
 

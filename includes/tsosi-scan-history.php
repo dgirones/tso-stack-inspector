@@ -100,8 +100,10 @@ function tsosi_scan_history_prune_index( $index, $max = 0 ) {
  * @return void
  */
 function tsosi_scan_history_enforce_max() {
+	$lock  = tsosi_acquire_lock( 'scan_history_index' );
 	$index = tsosi_scan_history_prune_index( tsosi_scan_history_get_index() );
 	update_option( TSOSI_OPTION_SCAN_HISTORY, $index, false );
+	tsosi_release_lock( $lock );
 }
 
 /**
@@ -136,6 +138,9 @@ function tsosi_scan_history_save( $query, $results, $meta ) {
 		return '';
 	}
 
+	// Guard the shared history index against a lost update if a background scan finishes
+	// while another request deletes/prunes history at the same time.
+	$lock    = tsosi_acquire_lock( 'scan_history_index' );
 	$index   = tsosi_scan_history_get_index();
 	$index[] = array(
 		'id'           => $id,
@@ -145,8 +150,9 @@ function tsosi_scan_history_save( $query, $results, $meta ) {
 		'mode'         => isset( $query['mode'] ) ? sanitize_key( (string) $query['mode'] ) : '',
 		'label'        => tsosi_scan_history_build_label( $query ),
 	);
-	$index = tsosi_scan_history_prune_index( $index );
+	$index   = tsosi_scan_history_prune_index( $index );
 	update_option( TSOSI_OPTION_SCAN_HISTORY, $index, false );
+	tsosi_release_lock( $lock );
 
 	return $id;
 }
@@ -212,6 +218,7 @@ function tsosi_scan_history_delete( $id ) {
 		return false;
 	}
 
+	$lock    = tsosi_acquire_lock( 'scan_history_index' );
 	$index   = tsosi_scan_history_get_index();
 	$kept    = array();
 	$deleted = false;
@@ -232,6 +239,7 @@ function tsosi_scan_history_delete( $id ) {
 	if ( $deleted ) {
 		update_option( TSOSI_OPTION_SCAN_HISTORY, array_values( $kept ), false );
 	}
+	tsosi_release_lock( $lock );
 
 	return $deleted;
 }
@@ -240,6 +248,7 @@ function tsosi_scan_history_delete( $id ) {
  * @return void
  */
 function tsosi_scan_history_delete_all() {
+	$lock  = tsosi_acquire_lock( 'scan_history_index' );
 	$index = tsosi_scan_history_get_index();
 	foreach ( $index as $entry ) {
 		if ( ! is_array( $entry ) || empty( $entry['file'] ) ) {
@@ -248,6 +257,7 @@ function tsosi_scan_history_delete_all() {
 		tsosi_scan_history_delete_file( (string) $entry['file'] );
 	}
 	delete_option( TSOSI_OPTION_SCAN_HISTORY );
+	tsosi_release_lock( $lock );
 }
 
 /**
@@ -260,16 +270,31 @@ function tsosi_scan_history_result_key( $row ) {
 	if ( ! is_array( $row ) ) {
 		return '';
 	}
-	return implode(
-		'|',
-		array(
-			isset( $row['match_type'] ) ? sanitize_key( (string) $row['match_type'] ) : '',
-			isset( $row['match_value'] ) ? (string) $row['match_value'] : '',
-			isset( $row['source_type'] ) ? sanitize_key( (string) $row['source_type'] ) : '',
-			isset( $row['object_label'] ) ? (string) $row['object_label'] : '',
-			isset( $row['object_id'] ) ? (string) absint( $row['object_id'] ) : '',
-		)
+
+	$parts = array(
+		isset( $row['match_type'] ) ? sanitize_key( (string) $row['match_type'] ) : '',
+		isset( $row['match_value'] ) ? (string) $row['match_value'] : '',
+		isset( $row['source_type'] ) ? sanitize_key( (string) $row['source_type'] ) : '',
 	);
+
+	$object_id = isset( $row['object_id'] ) ? absint( $row['object_id'] ) : 0;
+	if ( $object_id > 0 ) {
+		// A real object (post/user/term/comment) has a stable numeric id -- use that, not
+		// object_label. object_label is a mutable DISPLAY value (e.g. get_the_title(), a
+		// comment excerpt) that can change between two scans without the underlying match
+		// changing at all; keying on it here made an unrelated post/page rename (or a term
+		// rename, etc.) between two scans look like the shortcode/block/meta match was
+		// "removed" under the old title and "added" back under the new one.
+		$parts[] = (string) $object_id;
+	} else {
+		// Widgets/options/menus/theme_mods are always recorded with object_id = 0 (see
+		// tsosi_scan_blob_rows() / tsosi_scan_match_menu_source()) -- there, the option
+		// name / menu name / widget label IS the only available stable identity, so it
+		// must stay part of the key.
+		$parts[] = isset( $row['object_label'] ) ? (string) $row['object_label'] : '';
+	}
+
+	return implode( '|', $parts );
 }
 
 /**

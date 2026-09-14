@@ -128,7 +128,7 @@ function tsosi_scan_cache_file_path( $basename ) {
 		return '';
 	}
 	$safe = basename( (string) $basename );
-	if ( '' === $safe || ! preg_match( '/^cache-(index|build)-u\d+|^history-u\d+-/', $safe ) ) {
+	if ( '' === $safe || ! preg_match( '/^cache-(index|build)-u\d+|^history-u\d+-|^replace-backup-u\d+-/', $safe ) ) {
 		return '';
 	}
 	return $dir . '/' . $safe;
@@ -169,6 +169,49 @@ function tsosi_scan_cache_write_json_file( $path, $data ) {
 }
 
 /**
+ * Acquire an exclusive, per-user lock guarding scan-job index reads/writes.
+ *
+ * Prevents a lost-update race when two concurrent requests for the same
+ * user (e.g. two open tabs, or a retried request) both read the build
+ * index, append to it, and write it back -- the last write would otherwise
+ * silently discard the other request's appended posts.
+ *
+ * @return resource|false Lock handle for tsosi_scan_job_unlock(), or false if unavailable.
+ */
+function tsosi_scan_job_lock() {
+	$dir = tsosi_scan_cache_storage_dir();
+	if ( '' === $dir ) {
+		return false;
+	}
+	$path = $dir . '/job-lock-' . tsosi_scan_cache_user_suffix() . '.lock';
+	// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- short-lived lock file guarding per-user scan-job index writes.
+	$handle = fopen( $path, 'c' );
+	if ( false === $handle ) {
+		return false;
+	}
+	if ( ! flock( $handle, LOCK_EX ) ) {
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- pairs with fopen() above.
+		fclose( $handle );
+		return false;
+	}
+	return $handle;
+}
+
+/**
+ * Release a lock acquired with tsosi_scan_job_lock().
+ *
+ * @param resource|false $handle Lock handle.
+ * @return void
+ */
+function tsosi_scan_job_unlock( $handle ) {
+	if ( is_resource( $handle ) ) {
+		flock( $handle, LOCK_UN );
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- pairs with fopen() in tsosi_scan_job_lock().
+		fclose( $handle );
+	}
+}
+
+/**
  * Remove finished index + in-progress build files for the current user.
  *
  * @return void
@@ -191,6 +234,10 @@ function tsosi_scan_delete_user_cache_files() {
 	if ( '' !== $build && is_file( $build ) ) {
 		wp_delete_file( $build );
 	}
+	$lock_file = $dir . '/job-lock-' . $suffix . '.lock';
+	if ( is_file( $lock_file ) ) {
+		wp_delete_file( $lock_file );
+	}
 }
 
 /**
@@ -204,8 +251,8 @@ function tsosi_scan_load_build_index() {
 	if ( ! tsosi_scan_content_cache_storage_ready() ) {
 		return $empty;
 	}
-	$path  = tsosi_scan_cache_file_path( tsosi_scan_cache_build_filename() );
-	$data  = tsosi_scan_cache_read_json_file( $path );
+	$path = tsosi_scan_cache_file_path( tsosi_scan_cache_build_filename() );
+	$data = tsosi_scan_cache_read_json_file( $path );
 	if ( ! is_array( $data ) ) {
 		return $empty;
 	}
@@ -290,42 +337,52 @@ function tsosi_scan_rebuild_content_cache() {
  * @return string
  */
 function tsosi_scan_get_max_post_modified_gmt() {
+	// Memoize per request: this is called once from tsosi_admin_get_js_config() and once
+	// from tsosi_admin_render_cache_bar() on the same admin page load (and again from any
+	// scan/cache-status check in between), and content can't change mid-request, so the
+	// second+ call would otherwise repeat the same query for nothing.
+	static $cached = null;
+	if ( null !== $cached ) {
+		return $cached;
+	}
+
 	global $wpdb;
 
-	$types = tsosi_get_scannable_post_types();
-	if ( empty( $types ) ) {
-		return '';
-	}
-
-	$max = '';
-	foreach ( $types as $post_type ) {
+	$types = array();
+	foreach ( tsosi_get_scannable_post_types() as $post_type ) {
 		$post_type = sanitize_key( (string) $post_type );
-		if ( '' === $post_type ) {
-			continue;
-		}
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-		$candidate = $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT MAX(post_modified_gmt) FROM {$wpdb->posts} WHERE post_type = %s",
-				$post_type
-			)
-		);
-		if ( ! is_string( $candidate ) || '' === $candidate ) {
-			continue;
-		}
-		if ( '' === $max || $candidate > $max ) {
-			$max = $candidate;
+		if ( '' !== $post_type ) {
+			$types[] = $post_type;
 		}
 	}
+	$types = array_values( array_unique( $types ) );
 
-	return $max;
+	if ( empty( $types ) ) {
+		$cached = '';
+		return $cached;
+	}
+
+	// One combined query instead of one MAX() query per post type -- same result
+	// (still the overall max across all scannable types), far fewer round-trips.
+	$placeholders = implode( ', ', array_fill( 0, count( $types ), '%s' ) );
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- cache-invalidation fingerprint, memoized above.
+	$max = $wpdb->get_var(
+		$wpdb->prepare(
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders is a fixed "%s, %s, ..." string sized from count( $types ) above, never from request input; the %s tokens it contains are filled by the $types argument below (verified: $types comes from tsosi_get_scannable_post_types() + sanitize_key(), not $_GET/$_POST). Known WPCS limitation with dynamic IN() placeholder counts -- see WordPress-Coding-Standards issues #1697/#1859.
+			"SELECT MAX(post_modified_gmt) FROM {$wpdb->posts} WHERE post_type IN ({$placeholders})",
+			$types
+		)
+	);
+
+	$cached = is_string( $max ) ? $max : '';
+	return $cached;
 }
 
 /**
  * Fingerprint for scan settings + site content scope.
  *
- * @param array<string,mixed> $settings Scan settings.
- * @param int[]               $post_ids Post IDs in scope.
+ * @param array<string,mixed>            $settings Scan settings.
+ * @param int[]                          $post_ids Post IDs in scope.
  * @param array<int,array<string,mixed>> $extras Extra targets.
  * @return string
  */
@@ -393,10 +450,10 @@ function tsosi_scan_get_content_cache( $fingerprint ) {
 /**
  * Build the needle-agnostic site index (posts + widgets/menus/options blobs).
  *
- * @param array<string,mixed>|null $settings    Scan settings.
- * @param int[]|null               $post_ids    Post IDs (collected when null).
+ * @param array<string,mixed>|null            $settings    Scan settings.
+ * @param int[]|null                          $post_ids    Post IDs (collected when null).
  * @param array<int,array<string,mixed>>|null $extras Extra targets.
- * @param string|null              $fingerprint Content fingerprint.
+ * @param string|null                         $fingerprint Content fingerprint.
  * @return array{posts:array<int,array<string,mixed>>,extras:array<int,array<string,mixed>>}|null
  */
 function tsosi_scan_build_content_index( $settings = null, $post_ids = null, $extras = null, $fingerprint = null ) {
@@ -556,12 +613,12 @@ function tsosi_index_job_start( $force = false ) {
 		$cache = tsosi_scan_get_content_cache( $fingerprint );
 		if ( is_array( $cache ) && ! empty( $cache['index'] ) ) {
 			return array(
-				'done'          => true,
-				'ready'         => true,
-				'cached'        => true,
-				'progress'      => 100,
-				'total_steps'   => count( $post_ids ) + count( $extras ),
-				'total_posts'   => count( $post_ids ),
+				'done'        => true,
+				'ready'       => true,
+				'cached'      => true,
+				'progress'    => 100,
+				'total_steps' => count( $post_ids ) + count( $extras ),
+				'total_posts' => count( $post_ids ),
 			);
 		}
 	}
@@ -608,12 +665,12 @@ function tsosi_index_job_start( $force = false ) {
 	}
 
 	return array(
-		'done'          => false,
-		'ready'         => false,
-		'cached'        => false,
-		'progress'      => 0,
-		'total_steps'   => $total,
-		'total_posts'   => count( $post_ids ),
+		'done'        => false,
+		'ready'       => false,
+		'cached'      => false,
+		'progress'    => 0,
+		'total_steps' => $total,
+		'total_posts' => count( $post_ids ),
 	);
 }
 
@@ -732,8 +789,8 @@ function tsosi_index_job_step() {
 }
 
 /**
- * @param string               $fingerprint Fingerprint.
- * @param array<string,mixed>  $index       Cached index payload.
+ * @param string              $fingerprint Fingerprint.
+ * @param array<string,mixed> $index       Cached index payload.
  * @return void
  */
 function tsosi_scan_save_content_cache( $fingerprint, $index ) {
@@ -924,9 +981,9 @@ function tsosi_scan_extract_widget_sources() {
  * @return array<int,array<string,mixed>>
  */
 function tsosi_scan_extract_autoload_option_sources() {
-	$rows    = array();
-	$options = wp_load_alloptions();
-	$skip_exact = array(
+	$rows          = array();
+	$options       = wp_load_alloptions();
+	$skip_exact    = array(
 		'cron',
 		'siteurl',
 		'home',
@@ -1047,7 +1104,7 @@ function tsosi_scan_match_blob_sources( $rows, $needles ) {
 		}
 		$kind = isset( $row['kind'] ) ? sanitize_key( (string) $row['kind'] ) : 'option';
 		if ( 'widget' === $kind ) {
-			$ctx = tsosi_ui_triple_text( 'Widget option', 'Opción de widget', 'Opció de widget' );
+			$ctx   = tsosi_ui_triple_text( 'Widget option', 'Opción de widget', 'Opció de widget' );
 			$found = array_merge(
 				$found,
 				tsosi_scan_blob_rows(
@@ -1063,7 +1120,7 @@ function tsosi_scan_match_blob_sources( $rows, $needles ) {
 		}
 
 		if ( 'theme_mod' === $kind ) {
-			$ctx = tsosi_ui_triple_text( 'Theme mods', 'Ajustes del tema', 'Ajustos del tema' );
+			$ctx   = tsosi_ui_triple_text( 'Theme mods', 'Ajustes del tema', 'Ajustos del tema' );
 			$found = array_merge(
 				$found,
 				tsosi_scan_blob_rows(
@@ -1078,7 +1135,7 @@ function tsosi_scan_match_blob_sources( $rows, $needles ) {
 			continue;
 		}
 
-		$ctx     = tsosi_ui_triple_text( 'wp_options', 'wp_options', 'wp_options' );
+		$ctx   = tsosi_ui_triple_text( 'wp_options', 'wp_options', 'wp_options' );
 		$found = array_merge(
 			$found,
 			tsosi_scan_blob_rows(
@@ -1174,16 +1231,15 @@ function tsosi_scan_match_cached_index( $index, $needles ) {
 
 	$settings = tsosi_get_scan_settings();
 	if ( ! empty( $settings['include_widgets'] ) && ! empty( $needles['option_prefixes'] ) ) {
-		$widget_ctx = tsosi_ui_triple_text( 'Widget option', 'Opción de widget', 'Opció de widget' );
-		$results    = array_merge(
+		$results = array_merge(
 			$results,
-			tsosi_scan_active_widget_instances( $needles, $widget_ctx, tsosi_scan_widgets_admin_url() )
+			tsosi_scan_active_widget_instances( $needles, tsosi_scan_widgets_admin_url() )
 		);
 	}
 	if ( ! empty( $settings['include_non_autoload_options'] ) && ! empty( $needles['option_prefixes'] ) ) {
 		$results = array_merge( $results, tsosi_scan_non_autoload_options( $needles ) );
 	}
-	if ( ! empty( $settings['include_theme_mods'] ) ) {
+	if ( ! empty( $settings['include_theme_mods'] ) || tsosi_scan_needles_want_theme_mods( $needles ) ) {
 		$results = array_merge( $results, tsosi_scan_theme_mods( $needles ) );
 	}
 	if ( ! empty( $settings['include_user_meta'] ) ) {
@@ -1202,12 +1258,12 @@ function tsosi_scan_match_cached_index( $index, $needles ) {
 /**
  * Build a completed scan response (shared by cache hit and job finish).
  *
- * @param array<string,mixed> $needles Needles.
+ * @param array<string,mixed>            $needles Needles.
  * @param array<int,array<string,mixed>> $results Results.
- * @param int                 $post_count Posts scanned/indexed.
- * @param int                 $extra_count Extras scanned/indexed.
- * @param bool                $from_cache Whether index came from cache.
- * @param array<string,mixed> $query      Original scan query (for history).
+ * @param int                            $post_count Posts scanned/indexed.
+ * @param int                            $extra_count Extras scanned/indexed.
+ * @param bool                           $from_cache Whether index came from cache.
+ * @param array<string,mixed>            $query      Original scan query (for history).
  * @return array<string,mixed>
  */
 function tsosi_scan_build_complete_response( $needles, $results, $post_count, $extra_count, $from_cache = false, $query = array() ) {
@@ -1216,24 +1272,24 @@ function tsosi_scan_build_complete_response( $needles, $results, $post_count, $e
 	);
 	$total_steps = $post_count + $extra_count;
 	$response    = array(
-		'done'            => true,
-		'cached'          => $from_cache,
-		'progress'        => 100,
-		'processed'       => $post_count,
-		'processed_steps' => $total_steps,
-		'total_steps'     => $total_steps,
-		'total_posts'     => $post_count,
-		'results'         => $results,
-		'result_count'    => count( $results ),
-		'needles'         => $needles,
-		'needles_empty'   => tsosi_scan_needles_are_empty( $needles ),
-		'risk'            => tsosi_scan_assess_risk( $results ),
-		'cleaner_url'     => tsosi_get_options_cleaner_url_from_needles(
+		'done'              => true,
+		'cached'            => $from_cache,
+		'progress'          => 100,
+		'processed'         => $post_count,
+		'processed_steps'   => $total_steps,
+		'total_steps'       => $total_steps,
+		'total_posts'       => $post_count,
+		'results'           => $results,
+		'result_count'      => count( $results ),
+		'needles'           => $needles,
+		'needles_empty'     => tsosi_scan_needles_are_empty( $needles ),
+		'risk'              => tsosi_scan_assess_query_aware_risk( $results, is_array( $query ) ? $query : array() ),
+		'cleaner_url'       => tsosi_get_options_cleaner_url_from_needles(
 			$needles,
 			isset( $query['plugin_file'] ) ? (string) $query['plugin_file'] : ''
 		),
 		'cleaner_available' => tsosi_options_cleaner_is_available(),
-		'plugin_file'     => isset( $query['plugin_file'] ) ? (string) $query['plugin_file'] : '',
+		'plugin_file'       => isset( $query['plugin_file'] ) ? (string) $query['plugin_file'] : '',
 	);
 
 	if ( is_array( $query ) && ! empty( $query ) ) {

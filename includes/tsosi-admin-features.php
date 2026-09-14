@@ -58,8 +58,8 @@ function tsosi_admin_handle_settings_save() {
 	wp_safe_redirect(
 		add_query_arg(
 			array(
-				'page'    => 'tso-stack-inspector',
-				'tab'     => 'settings',
+				'page'        => 'tso-stack-inspector',
+				'tab'         => 'settings',
 				'tsosi_saved' => '1',
 			),
 			admin_url( 'tools.php' )
@@ -96,8 +96,8 @@ function tsosi_admin_echo_help( $text ) {
  * @return void
  */
 function tsosi_admin_render_cache_bar() {
-	$status   = tsosi_scan_get_cache_status();
-	$ready    = ! empty( $status['ready'] );
+	$status = tsosi_scan_get_cache_status();
+	$ready  = ! empty( $status['ready'] );
 	echo '<div class="tsosi-cache-bar" id="tsosi-cache-bar" data-ready="' . ( $ready ? '1' : '0' ) . '">';
 	echo '<div class="tsosi-cache-bar-main">';
 	if ( $ready ) {
@@ -231,7 +231,7 @@ function tsosi_admin_render_settings_tab() {
 		),
 		'include_theme_mods'           => array(
 			'label' => tsosi_ui_triple_text( 'Theme mods (Customizer)', 'Ajustes del tema (Personalizador)', 'Ajustos del tema (Personalitzador)' ),
-			'help'  => tsosi_ui_triple_text( 'Search Customizer values saved as theme_mods (widgets in customizer, embeds in theme settings).', 'Busca valores del Personalizador guardados como theme_mods (widgets en personalizador, incrustaciones en ajustes del tema).', 'Cerca valors del Personalitzador desats com a theme_mods (widgets al personalitzador, incrustacions als ajustos del tema).' ),
+			'help'  => tsosi_ui_triple_text( 'Search Customizer values saved as theme_mods (widgets in customizer, embeds in theme settings). A "Theme" scan always checks that theme\'s own theme_mods regardless of this setting.', 'Busca valores del Personalizador guardados como theme_mods (widgets en personalizador, incrustaciones en ajustes del tema). Un escaneo de "Tema" siempre revisa los theme_mods de ese tema, sin importar este ajuste.', 'Cerca valors del Personalitzador desats com a theme_mods (widgets al personalitzador, incrustacions als ajustos del tema). Un escaneig de "Tema" sempre revisa els theme_mods d\'aquell tema, independentment d\'aquest ajust.' ),
 		),
 	);
 	echo '<fieldset class="tsosi-settings-group"><legend>' . esc_html( tsosi_ui_triple_text( 'Include in scan', 'Incluir en el escaneo', 'Incloure a l\'escaneig' ) ) . '</legend>';
@@ -286,9 +286,9 @@ function tsosi_admin_render_settings_tab() {
  * @return void
  */
 function tsosi_admin_render_theme_tab() {
-	$active     = wp_get_theme();
+	$active      = wp_get_theme();
 	$active_slug = (string) $active->get_stylesheet();
-	$themes     = wp_get_themes();
+	$themes      = wp_get_themes();
 	uksort(
 		$themes,
 		function ( $a, $b ) use ( $active_slug ) {
@@ -322,8 +322,8 @@ function tsosi_admin_render_theme_tab() {
 		if ( ! $theme instanceof WP_Theme ) {
 			continue;
 		}
-		$name   = (string) $theme->get( 'Name' );
-		$label  = $name;
+		$name      = (string) $theme->get( 'Name' );
+		$label     = $name;
 		$is_active = ( $stylesheet === $active_slug );
 		if ( $is_active ) {
 			$label .= ' (' . tsosi_ui_triple_text( 'active', 'activo', 'actiu' ) . ')';
@@ -343,9 +343,19 @@ function tsosi_admin_render_theme_tab() {
 		)
 	) . '</p>';
 	echo '<ul class="tsosi-tag-list" id="tsosi-theme-profile-list">';
-	echo '<li>' . esc_html( tsosi_ui_triple_text( 'Shortcodes', 'Shortcodes', 'Shortcodes' ) ) . ': <code>' . esc_html( implode( ', ', (array) $profile['shortcodes'] ) ?: '—' ) . '</code></li>';
-	echo '<li>' . esc_html( tsosi_ui_triple_text( 'Blocks', 'Bloques', 'Blocs' ) ) . ': <code>' . esc_html( implode( ', ', (array) $profile['blocks'] ) ?: '—' ) . '</code></li>';
-	echo '<li>' . esc_html( tsosi_ui_triple_text( 'Meta prefixes', 'Prefijos meta', 'Prefixos meta' ) ) . ': <code>' . esc_html( implode( ', ', (array) $profile['meta_prefixes'] ) ?: '—' ) . '</code></li>';
+	$theme_profile_join = static function ( $items ) {
+		$joined = implode( ', ', (array) $items );
+		return '' !== $joined ? $joined : '—';
+	};
+	echo '<li>' . esc_html( tsosi_ui_triple_text( 'Shortcodes', 'Shortcodes', 'Shortcodes' ) ) . ': <code>' . esc_html( $theme_profile_join( $profile['shortcodes'] ) ) . '</code></li>';
+	echo '<li>' . esc_html( tsosi_ui_triple_text( 'Blocks', 'Bloques', 'Blocs' ) ) . ': <code>' . esc_html( $theme_profile_join( $profile['blocks'] ) ) . '</code></li>';
+	echo '<li>' . esc_html( tsosi_ui_triple_text( 'Meta prefixes', 'Prefijos meta', 'Prefixos meta' ) ) . ': <code>' . esc_html( $theme_profile_join( $profile['meta_prefixes'] ) ) . '</code></li>';
+	// tsosi_build_theme_profile() always sets an option_prefixes entry for
+	// "theme_mods_{stylesheet}", searched unconditionally regardless of the
+	// "include_theme_mods" setting -- omitting it here would show an all-dash "nothing
+	// to search for" preview for a theme with no shortcodes/blocks/meta, even though the
+	// scan still checks (and can match) theme_mods.
+	echo '<li>' . esc_html( tsosi_ui_triple_text( 'Option prefixes', 'Prefijos de opciones', 'Prefixos d\'opcions' ) ) . ': <code>' . esc_html( $theme_profile_join( $profile['option_prefixes'] ) ) . '</code></li>';
 	echo '</ul>';
 	echo '<p class="description" id="tsosi-theme-profile-note">' . esc_html(
 		tsosi_ui_triple_text(
@@ -489,9 +499,9 @@ function tsosi_admin_render_orphans_tab() {
 	echo '<h2>' . esc_html( tsosi_ui_triple_text( 'Orphan shortcodes & blocks', 'Shortcodes y bloques huérfanos', 'Shortcodes i blocs orfes' ) ) . '</h2>';
 	tsosi_admin_echo_help(
 		tsosi_ui_triple_text(
-			'Looks for shortcodes and blocks still in editable content (posts, site templates, and widgets) that no currently active plugin registers. Useful after removing a plugin to see if any markup was left behind before you clean up or replace it.',
-			'Busca shortcodes y bloques que siguen en el contenido editable (entradas, plantillas del sitio y widgets) pero que ningún plugin activo registra ahora. Útil tras quitar un plugin para comprobar si quedó markup antes de limpiar o sustituirlo.',
-			'Cerca shortcodes i blocs que encara hi ha al contingut editable (entrades, plantilles del lloc i widgets) però que cap plugin actiu registra ara. Útil després de treure un plugin per comprovar si ha quedat markup abans de netejar-lo o substituir-lo.'
+			'Looks for shortcodes and blocks still in editable content (posts, site templates, widgets, and navigation menus) that no currently active plugin registers. Useful after removing a plugin to see if any markup was left behind before you clean up or replace it. "Replace" is only offered when the tag also appears in a post/page/template -- Replace only edits post content, not widgets or menus.',
+			'Busca shortcodes y bloques que siguen en el contenido editable (entradas, plantillas del sitio, widgets y menús de navegación) pero que ningún plugin activo registra ahora. Útil tras quitar un plugin para comprobar si quedó markup antes de limpiar o sustituirlo. "Sustituir" solo aparece cuando la etiqueta también está en una entrada/página/plantilla -- Sustituir solo edita el contenido, no widgets ni menús.',
+			'Cerca shortcodes i blocs que encara hi ha al contingut editable (entrades, plantilles del lloc, widgets i menús de navegació) però que cap plugin actiu registra ara. Útil després de treure un plugin per comprovar si ha quedat markup abans de netejar-lo o substituir-lo. "Substituir" només apareix quan l\'etiqueta també és en una entrada/pàgina/plantilla -- Substituir només edita el contingut, no widgets ni menús.'
 		)
 	);
 	echo '<p><button type="button" class="button button-primary" id="tsosi-run-orphans">';
@@ -557,11 +567,11 @@ function tsosi_admin_history_entry_option_label( $entry ) {
 	if ( ! is_array( $entry ) ) {
 		return '';
 	}
-	$when = ! empty( $entry['saved_at'] )
+	$when    = ! empty( $entry['saved_at'] )
 		? wp_date( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), (int) $entry['saved_at'] )
 		: '—';
-	$label = (string) ( $entry['label'] ?? '' );
-	$count = (int) ( $entry['result_count'] ?? 0 );
+	$label   = (string) ( $entry['label'] ?? '' );
+	$count   = (int) ( $entry['result_count'] ?? 0 );
 	$matches = sprintf(
 		/* translators: %d: number of matches */
 		tsosi_ui_triple_text( '%d matches', '%d coincidencias', '%d coincidències' ),
@@ -898,9 +908,9 @@ add_action( 'wp_ajax_tsosi_audit_inactive', 'tsosi_ajax_audit_inactive' );
  */
 function tsosi_ajax_replace_preview() {
 	tsosi_ajax_require_manage_options();
-	$kind = tsosi_get_ajax_post_text( 'kind', 'shortcode' );
-	$from = tsosi_get_ajax_post_text( 'from' );
-	$to   = tsosi_get_ajax_post_text( 'to' );
+	$kind   = tsosi_get_ajax_post_text( 'kind', 'shortcode' );
+	$from   = tsosi_get_ajax_post_text( 'from' );
+	$to     = tsosi_get_ajax_post_text( 'to' );
 	$result = tsosi_replace_preview( $kind, $from, $to );
 	if ( is_wp_error( $result ) ) {
 		wp_send_json_error( array( 'message' => $result->get_error_message() ) );
@@ -916,13 +926,13 @@ add_action( 'wp_ajax_tsosi_replace_preview', 'tsosi_ajax_replace_preview' );
  */
 function tsosi_ajax_replace_apply() {
 	tsosi_ajax_require_manage_options();
-	$kind = tsosi_get_ajax_post_text( 'kind', 'shortcode' );
-	$from = tsosi_get_ajax_post_text( 'from' );
-	$to   = tsosi_get_ajax_post_text( 'to' );
-	$raw  = tsosi_get_ajax_post_text( 'post_ids' );
-	$ids  = array_filter( array_map( 'absint', explode( ',', $raw ) ) );
+	$kind      = tsosi_get_ajax_post_text( 'kind', 'shortcode' );
+	$from      = tsosi_get_ajax_post_text( 'from' );
+	$to        = tsosi_get_ajax_post_text( 'to' );
+	$raw       = tsosi_get_ajax_post_text( 'post_ids' );
+	$ids       = array_filter( array_map( 'absint', explode( ',', $raw ) ) );
 	$backup_id = tsosi_get_ajax_post_text( 'backup_id' );
-	$result = tsosi_replace_apply( $kind, $from, $to, $ids, $backup_id );
+	$result    = tsosi_replace_apply( $kind, $from, $to, $ids, $backup_id );
 	if ( is_wp_error( $result ) ) {
 		wp_send_json_error( array( 'message' => $result->get_error_message() ) );
 	}
@@ -973,8 +983,8 @@ add_action( 'wp_ajax_tsosi_find_orphans', 'tsosi_ajax_find_orphans' );
  */
 function tsosi_ajax_history_diff() {
 	tsosi_ajax_require_manage_options();
-	$a = tsosi_get_ajax_post_text( 'id_a' );
-	$b = tsosi_get_ajax_post_text( 'id_b' );
+	$a      = tsosi_get_ajax_post_text( 'id_a' );
+	$b      = tsosi_get_ajax_post_text( 'id_b' );
 	$result = tsosi_scan_history_diff( $a, $b );
 	if ( is_wp_error( $result ) ) {
 		wp_send_json_error( array( 'message' => $result->get_error_message() ) );
@@ -998,6 +1008,11 @@ function tsosi_ajax_scan_poll() {
 	if ( is_array( $progress ) ) {
 		wp_send_json_success( $progress );
 	}
-	wp_send_json_success( array( 'done' => false, 'background' => false ) );
+	wp_send_json_success(
+		array(
+			'done'       => false,
+			'background' => false,
+		)
+	);
 }
 add_action( 'wp_ajax_tsosi_scan_poll', 'tsosi_ajax_scan_poll' );

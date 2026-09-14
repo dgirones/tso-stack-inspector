@@ -27,7 +27,7 @@ if ( ! defined( 'TSOSI_REPLACE_BACKUP_TTL' ) ) {
  * @return string[]
  */
 function tsosi_replace_post_types() {
-	$types = array( 'post', 'page', 'wp_block', 'wp_template', 'wp_template_part', 'wp_navigation' );
+	$types  = array( 'post', 'page', 'wp_block', 'wp_template', 'wp_template_part', 'wp_navigation' );
 	$public = get_post_types( array( 'public' => true ), 'names' );
 	if ( is_array( $public ) ) {
 		$types = array_merge( $types, array_values( $public ) );
@@ -62,7 +62,7 @@ function tsosi_replace_shortcode_in_content( $content, $from, $to ) {
 	// Closing tags: [/from]
 	$content = preg_replace( '/\[\/' . $from_q . '\]/i', '[/' . $to_q . ']', $content );
 	// Opening / self-closing: [from ...] or [from]
-	$content = preg_replace( '/\[' . $from_q . '(\s|\])/i', '[' . $to_q . '$1', $content );
+	$content = preg_replace( '/\[' . $from_q . '(\s|\]|\/)/i', '[' . $to_q . '$1', $content );
 
 	return is_string( $content ) ? $content : '';
 }
@@ -85,7 +85,7 @@ function tsosi_replace_block_in_content( $content, $from, $to ) {
 	$from_q = preg_quote( $from, '/' );
 	// <!-- wp:old/name ... --> and <!-- /wp:old/name -->
 	$content = preg_replace( '/(<!--\s*\/?wp:)' . $from_q . '([\s{])/i', '$1' . $to . '$2', $content );
-	$content = preg_replace( '/(<!--\s*\/?wp:)' . $from_q . '(\s*-->)/i', '$1' . $to . '$2', $content );
+	$content = preg_replace( '/(<!--\s*\/?wp:)' . $from_q . '(\s*\/?-->)/i', '$1' . $to . '$2', $content );
 
 	return is_string( $content ) ? $content : '';
 }
@@ -224,13 +224,13 @@ function tsosi_replace_preview( $kind, $from, $to ) {
 	}
 
 	return array(
-		'kind'         => $kind,
-		'from'         => $from,
-		'to'           => $to,
-		'count'        => count( $items ),
-		'capped'       => count( $candidates ) >= 500 || count( $items ) >= 200,
-		'items'        => $items,
-		'post_ids'     => wp_list_pluck( $items, 'id' ),
+		'kind'     => $kind,
+		'from'     => $from,
+		'to'       => $to,
+		'count'    => count( $items ),
+		'capped'   => count( $candidates ) >= 500 || count( $items ) >= 200,
+		'items'    => $items,
+		'post_ids' => wp_list_pluck( $items, 'id' ),
 	);
 }
 
@@ -249,8 +249,8 @@ function tsosi_replace_apply( $kind, $from, $to, $post_ids, $backup_id = '' ) {
 		return $preview;
 	}
 
-	$allowed = array_map( 'absint', (array) ( $preview['post_ids'] ?? array() ) );
-	$allowed = array_fill_keys( $allowed, true );
+	$allowed  = array_map( 'absint', (array) ( $preview['post_ids'] ?? array() ) );
+	$allowed  = array_fill_keys( $allowed, true );
 	$post_ids = array_values( array_filter( array_map( 'absint', (array) $post_ids ) ) );
 	$post_ids = array_slice( $post_ids, 0, TSOSI_REPLACE_BATCH );
 
@@ -276,7 +276,7 @@ function tsosi_replace_apply( $kind, $from, $to, $post_ids, $backup_id = '' ) {
 			continue;
 		}
 		$backup_posts[ (string) $post_id ] = $old;
-		$result = wp_update_post(
+		$result                            = wp_update_post(
 			array(
 				'ID'           => $post_id,
 				'post_content' => $new,
@@ -335,11 +335,19 @@ function tsosi_replace_backup_get_index() {
 /**
  * Remove expired replace backups (files + index).
  *
+ * Guards its own read-modify-write with the same 'replace_backups_index' lock used by
+ * tsosi_replace_backup_save()/tsosi_replace_backup_append(), so a prune running here can't
+ * race their writes and silently drop or resurrect an entry. Callers that already hold that
+ * lock (save()/append()) must not call this indirectly via tsosi_replace_backup_get_index() --
+ * they read the option directly instead, to avoid a self-deadlock on a non-reentrant flock().
+ *
  * @return void
  */
 function tsosi_replace_backup_prune_expired() {
+	$lock  = tsosi_acquire_lock( 'replace_backups_index' );
 	$index = get_option( TSOSI_OPTION_REPLACE_BACKUPS, array() );
 	if ( ! is_array( $index ) || empty( $index ) ) {
+		tsosi_release_lock( $lock );
 		return;
 	}
 	$now  = time();
@@ -363,6 +371,7 @@ function tsosi_replace_backup_prune_expired() {
 	if ( count( $kept ) !== count( $index ) ) {
 		update_option( TSOSI_OPTION_REPLACE_BACKUPS, array_values( $kept ), false );
 	}
+	tsosi_release_lock( $lock );
 }
 
 /**
@@ -396,8 +405,15 @@ function tsosi_replace_backup_save( $payload ) {
 		return '';
 	}
 
-	$index   = tsosi_replace_backup_get_index();
-	$index[] = array(
+	// Guard the shared backups index against a lost update if another request
+	// (a second "Apply" or a concurrent append) writes the same option at the same time.
+	// Read the option directly (not via tsosi_replace_backup_get_index()): that helper
+	// prunes expired entries under this same lock, and re-acquiring a held flock() from
+	// the same process would deadlock.
+	$index_lock = tsosi_acquire_lock( 'replace_backups_index' );
+	$index      = get_option( TSOSI_OPTION_REPLACE_BACKUPS, array() );
+	$index      = is_array( $index ) ? $index : array();
+	$index[]    = array(
 		'id'         => $id,
 		'file'       => $filename,
 		'saved_at'   => $data['saved_at'],
@@ -421,19 +437,27 @@ function tsosi_replace_backup_save( $payload ) {
 		$index = array_slice( $index, -10 );
 	}
 	update_option( TSOSI_OPTION_REPLACE_BACKUPS, array_values( $index ), false );
+	tsosi_release_lock( $index_lock );
 	return $id;
 }
 
 /**
  * Append posts to an existing replace backup.
  *
- * @param string                $id    Backup id.
- * @param array<string,string>  $posts Map post_id => content.
+ * @param string               $id    Backup id.
+ * @param array<string,string> $posts Map post_id => content.
  * @return string Backup id or empty on failure.
  */
 function tsosi_replace_backup_append( $id, $posts ) {
+	// Guard this backup's own file against a lost update if two "Apply" batches for
+	// the same backup id race each other (e.g. a manual retry while the first is
+	// still in flight) -- without this, the second read-modify-write can silently
+	// drop posts the first request had just appended, leaving "Undo" incomplete.
+	$file_lock = tsosi_acquire_lock( 'replace_backup_' . sanitize_key( (string) $id ) );
+
 	$data = tsosi_replace_backup_load( $id );
 	if ( ! is_array( $data ) || empty( $data['file'] ) ) {
+		tsosi_release_lock( $file_lock );
 		return tsosi_replace_backup_save(
 			array(
 				'kind'  => '',
@@ -452,10 +476,14 @@ function tsosi_replace_backup_append( $id, $posts ) {
 	$data['posts'] = $existing;
 	$path          = tsosi_scan_cache_file_path( (string) $data['file'] );
 	if ( '' === $path || ! tsosi_scan_cache_write_json_file( $path, $data ) ) {
+		tsosi_release_lock( $file_lock );
 		return '';
 	}
+	tsosi_release_lock( $file_lock );
 
-	$index = tsosi_replace_backup_get_index();
+	$index_lock = tsosi_acquire_lock( 'replace_backups_index' );
+	$index      = get_option( TSOSI_OPTION_REPLACE_BACKUPS, array() );
+	$index      = is_array( $index ) ? $index : array();
 	foreach ( $index as &$entry ) {
 		if ( is_array( $entry ) && isset( $entry['id'] ) && (string) $entry['id'] === (string) $id ) {
 			$entry['count'] = count( $existing );
@@ -463,6 +491,7 @@ function tsosi_replace_backup_append( $id, $posts ) {
 	}
 	unset( $entry );
 	update_option( TSOSI_OPTION_REPLACE_BACKUPS, array_values( $index ), false );
+	tsosi_release_lock( $index_lock );
 	return (string) $id;
 }
 

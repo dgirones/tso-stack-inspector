@@ -42,16 +42,25 @@ function tsosi_get_scannable_post_types() {
  * @return array<string,mixed>|WP_Error
  */
 function tsosi_scan_job_start( $query ) {
-	$query    = is_array( $query ) ? $query : array();
+	$query = is_array( $query ) ? $query : array();
 	if ( function_exists( 'tsosi_index_job_cancel' ) ) {
 		tsosi_index_job_cancel();
 	}
 	$settings = tsosi_get_scan_settings();
 	$needles  = tsosi_scan_resolve_needles( $query );
 
-	$post_ids = tsosi_scan_collect_post_ids( $settings );
-	$extras   = tsosi_scan_collect_extra_targets( $settings );
+	$post_ids    = tsosi_scan_collect_post_ids( $settings );
+	$extras      = tsosi_scan_collect_extra_targets( $settings );
 	$fingerprint = tsosi_scan_content_fingerprint( $settings, $post_ids, $extras );
+
+	// A "theme" scan always checks that theme's own theme_mods_{stylesheet}, even when the
+	// global "Theme mods (Customizer)" setting is off: it's the theme being inspected, not
+	// an unrelated blob. Added after the fingerprint so it stays aligned with the shared
+	// site index cache (theme_mods content is never stored in that index anyway; see
+	// tsosi_scan_extra_is_needle_dependent()).
+	if ( empty( $settings['include_theme_mods'] ) && tsosi_scan_needles_want_theme_mods( $needles ) ) {
+		$extras[] = array( 'type' => 'theme_mods' );
+	}
 
 	delete_transient( tsosi_scan_job_transient_key() );
 	tsosi_scan_delete_build_index();
@@ -240,6 +249,25 @@ function tsosi_scan_extra_is_needle_dependent( $type ) {
 }
 
 /**
+ * Whether the resolved needles target a specific theme's theme_mods_{stylesheet} option
+ * (i.e. this is a "theme" mode scan), regardless of the include_theme_mods setting.
+ *
+ * @param array<string,mixed> $needles Resolved needles.
+ * @return bool
+ */
+function tsosi_scan_needles_want_theme_mods( $needles ) {
+	$prefixes = isset( $needles['option_prefixes'] ) && is_array( $needles['option_prefixes'] )
+		? $needles['option_prefixes']
+		: array();
+	foreach ( $prefixes as $prefix ) {
+		if ( 0 === strpos( (string) $prefix, 'theme_mods_' ) ) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
  * Cancel the current user's in-progress scan.
  *
  * @return void
@@ -278,7 +306,11 @@ function tsosi_scan_job_step() {
 	$offset      = isset( $job['post_offset'] ) ? (int) $job['post_offset'] : 0;
 	$extras      = isset( $job['extras'] ) && is_array( $job['extras'] ) ? $job['extras'] : array();
 	$extra_index = isset( $job['extra_index'] ) ? (int) $job['extra_index'] : 0;
-	$index       = tsosi_scan_load_build_index();
+
+	// Serialize concurrent steps for this user so two overlapping requests can't
+	// each read the index, append different posts, and have the last write win.
+	$lock  = tsosi_scan_job_lock();
+	$index = tsosi_scan_load_build_index();
 
 	$batch = array_slice( $post_ids, $offset, TSOSI_SCAN_BATCH_SIZE );
 	foreach ( $batch as $post_id ) {
@@ -286,7 +318,7 @@ function tsosi_scan_job_step() {
 		if ( is_array( $source ) ) {
 			$index['posts'][] = $source;
 		}
-		$offset++;
+		++$offset;
 	}
 
 	if ( ! tsosi_scan_save_build_index( $index ) ) {
@@ -294,6 +326,7 @@ function tsosi_scan_job_step() {
 		$job['post_offset'] = $offset;
 		$job['results']     = tsosi_scan_match_cached_index( $index, $needles );
 		set_transient( tsosi_scan_job_transient_key(), $job, HOUR_IN_SECONDS );
+		tsosi_scan_job_unlock( $lock );
 		return tsosi_scan_job_step_legacy( $job );
 	}
 
@@ -326,11 +359,13 @@ function tsosi_scan_job_step() {
 		$results = tsosi_scan_match_cached_index( $index, $needles );
 		tsosi_scan_delete_build_index();
 		delete_transient( tsosi_scan_job_transient_key() );
+		tsosi_scan_job_unlock( $lock );
 
 		return tsosi_scan_build_complete_response( $needles, $results, count( $post_ids ), count( $extras ), false, $query );
 	}
 
 	set_transient( tsosi_scan_job_transient_key(), $job, HOUR_IN_SECONDS );
+	tsosi_scan_job_unlock( $lock );
 
 	$total_steps = count( $post_ids ) + count( $extras );
 	$current     = min( $offset, count( $post_ids ) ) + min( $extra_index, count( $extras ) );
@@ -369,7 +404,7 @@ function tsosi_scan_job_step_legacy( $job ) {
 	foreach ( $batch as $post_id ) {
 		$found   = tsosi_scan_post( (int) $post_id, $needles );
 		$results = array_merge( $results, $found );
-		$offset++;
+		++$offset;
 	}
 
 	$job['post_offset'] = $offset;
@@ -380,7 +415,7 @@ function tsosi_scan_job_step_legacy( $job ) {
 	$done_posts = $offset >= count( $post_ids );
 
 	if ( $done_posts && $extra_index < count( $extras ) ) {
-		$results            = array_merge( $results, tsosi_scan_extra_target( $extras[ $extra_index ], $needles ) );
+		$results = array_merge( $results, tsosi_scan_extra_target( $extras[ $extra_index ], $needles ) );
 		++$extra_index;
 		$job['extra_index'] = $extra_index;
 		$job['results']     = $results;
@@ -680,10 +715,10 @@ function tsosi_scan_filter_inspector_false_positives( $results, $query ) {
 function tsosi_scan_resolve_needles( $query ) {
 	$mode = isset( $query['mode'] ) ? sanitize_key( (string) $query['mode'] ) : 'plugin';
 
-	$shortcodes = array();
-	$blocks     = array();
-	$meta_keys  = array();
-	$meta_prefixes = array();
+	$shortcodes      = array();
+	$blocks          = array();
+	$meta_keys       = array();
+	$meta_prefixes   = array();
 	$option_prefixes = array();
 
 	if ( 'shortcode' === $mode ) {
@@ -699,7 +734,7 @@ function tsosi_scan_resolve_needles( $query ) {
 	} elseif ( 'plugin' === $mode ) {
 		$plugin_file = isset( $query['plugin_file'] ) ? tsosi_sanitize_plugin_file( (string) $query['plugin_file'] ) : '';
 		if ( '' !== $plugin_file ) {
-			$profile = tsosi_build_plugin_profile( $plugin_file );
+			$profile         = tsosi_build_plugin_profile( $plugin_file );
 			$shortcodes      = isset( $profile['shortcodes'] ) ? (array) $profile['shortcodes'] : array();
 			$blocks          = isset( $profile['blocks'] ) ? (array) $profile['blocks'] : array();
 			$meta_prefixes   = isset( $profile['meta_prefixes'] ) ? (array) $profile['meta_prefixes'] : array();
@@ -714,8 +749,8 @@ function tsosi_scan_resolve_needles( $query ) {
 			}
 		}
 	} elseif ( 'theme' === $mode ) {
-		$stylesheet = isset( $query['theme'] ) ? sanitize_text_field( (string) $query['theme'] ) : '';
-		$profile    = tsosi_build_theme_profile( $stylesheet );
+		$stylesheet      = isset( $query['theme'] ) ? sanitize_text_field( (string) $query['theme'] ) : '';
+		$profile         = tsosi_build_theme_profile( $stylesheet );
 		$shortcodes      = isset( $profile['shortcodes'] ) ? (array) $profile['shortcodes'] : array();
 		$blocks          = isset( $profile['blocks'] ) ? (array) $profile['blocks'] : array();
 		$meta_prefixes   = isset( $profile['meta_prefixes'] ) ? (array) $profile['meta_prefixes'] : array();
@@ -844,9 +879,9 @@ function tsosi_scan_post( $post_id, $needles ) {
 }
 
 /**
- * @param string              $content    Content.
- * @param string[]            $shortcodes Tags to find.
- * @param WP_Post             $post       Post context.
+ * @param string   $content    Content.
+ * @param string[] $shortcodes Tags to find.
+ * @param WP_Post  $post       Post context.
  * @return array<int,array<string,mixed>>
  */
 function tsosi_scan_content_for_shortcodes( $content, $shortcodes, $post ) {
@@ -893,10 +928,11 @@ function tsosi_scan_content_for_blocks( $content, $blocks, $post ) {
 	$present = array_unique( array_map( 'tsosi_sanitize_block_name', $matches[1] ) );
 	foreach ( $blocks as $block_name ) {
 		$block_name = tsosi_sanitize_block_name( (string) $block_name );
-		$block_root = strstr( $block_name, '/', true );
-		if ( false === $block_root ) {
-			$block_root = $block_name;
-		}
+		// Only fall back to a namespace-root match ("acme/*") when the needle itself
+		// has no slash -- otherwise a full "acme/hero-banner" needle would also match
+		// an unrelated sibling block like "acme/footer" from the same namespace.
+		$has_slash  = false !== strpos( $block_name, '/' );
+		$block_root = $has_slash ? '' : $block_name;
 		foreach ( $present as $candidate ) {
 			if (
 				$candidate === $block_name
@@ -935,7 +971,7 @@ function tsosi_scan_post_meta( $post_id, $needles, $post ) {
 		return array();
 	}
 
-	$found       = array();
+	$found        = array();
 	$matched_keys = array();
 
 	foreach ( $keys as $meta_key ) {
@@ -980,7 +1016,7 @@ function tsosi_scan_post_meta( $post_id, $needles, $post ) {
 			if ( tsosi_is_runtime_analytics_storage_key( $meta_key ) ) {
 				continue;
 			}
-			$found[]        = tsosi_scan_make_result(
+			$found[] = tsosi_scan_make_result(
 				$post,
 				'meta',
 				$meta_key,
@@ -1001,8 +1037,8 @@ function tsosi_scan_post_meta( $post_id, $needles, $post ) {
  * @return array<int,array<string,mixed>>
  */
 function tsosi_scan_post_builder_meta( $post_id, $needles, $post ) {
-	$found = array();
-	$tags  = isset( $needles['shortcodes'] ) && is_array( $needles['shortcodes'] ) ? $needles['shortcodes'] : array();
+	$found  = array();
+	$tags   = isset( $needles['shortcodes'] ) && is_array( $needles['shortcodes'] ) ? $needles['shortcodes'] : array();
 	$blocks = isset( $needles['blocks'] ) && is_array( $needles['blocks'] ) ? $needles['blocks'] : array();
 
 	foreach ( tsosi_scan_collect_builder_blobs( $post_id ) as $value ) {
@@ -1147,7 +1183,7 @@ function tsosi_scan_widgets( $needles ) {
 		);
 	}
 
-	$found = array_merge( $found, tsosi_scan_active_widget_instances( $needles, $ctx, $widgets_url ) );
+	$found = array_merge( $found, tsosi_scan_active_widget_instances( $needles, $widgets_url ) );
 
 	return tsosi_scan_dedupe_results( $found );
 }
@@ -1163,10 +1199,10 @@ function tsosi_scan_options( $needles ) {
 		return array();
 	}
 
-	$found   = array();
-	$options = wp_load_alloptions();
-	$ctx     = tsosi_ui_triple_text( 'wp_options', 'wp_options', 'wp_options' );
-	$skip_exact = array(
+	$found         = array();
+	$options       = wp_load_alloptions();
+	$ctx           = tsosi_ui_triple_text( 'wp_options', 'wp_options', 'wp_options' );
+	$skip_exact    = array(
 		'cron',
 		'siteurl',
 		'home',
@@ -1235,7 +1271,16 @@ function tsosi_scan_widgets_admin_url() {
 }
 
 /**
- * Map widget instance IDs to sidebar IDs.
+ * Map widget instance IDs to sidebar IDs -- only for sidebars the active theme actually
+ * registers and renders right now.
+ *
+ * Switching themes doesn't move a widget to "Inactive widgets": WordPress keeps it under
+ * its original sidebar_id in the 'sidebars_widgets' option even when that sidebar no
+ * longer exists in $wp_registered_sidebars, ready to reappear if the old theme comes
+ * back. Without the $wp_registered_sidebars check, such a widget -- not rendered
+ * anywhere on the current site -- would be reported as "active in a sidebar" just like a
+ * genuinely displayed one, which is exactly the kind of "looks active but isn't" mismatch
+ * this scanner exists to avoid.
  *
  * @return array<string,string>
  */
@@ -1245,8 +1290,14 @@ function tsosi_scan_get_widget_sidebar_map() {
 	if ( ! is_array( $sidebars ) ) {
 		return $map;
 	}
+	global $wp_registered_sidebars;
+	$registered = is_array( $wp_registered_sidebars ) ? $wp_registered_sidebars : array();
+
 	foreach ( $sidebars as $sidebar_id => $widget_ids ) {
 		if ( ! is_array( $widget_ids ) || 'wp_inactive_widgets' === $sidebar_id ) {
+			continue;
+		}
+		if ( ! isset( $registered[ $sidebar_id ] ) ) {
 			continue;
 		}
 		foreach ( $widget_ids as $widget_id ) {
@@ -1330,7 +1381,7 @@ function tsosi_scan_format_widget_result_label( $option_name, $source_type ) {
  */
 function tsosi_scan_option_name_matches_prefix( $option_name, $prefix ) {
 	$option_name = tsosi_sanitize_option_prefix( $option_name );
-	$prefix        = tsosi_sanitize_option_prefix( $prefix );
+	$prefix      = tsosi_sanitize_option_prefix( $prefix );
 	if ( '' === $option_name || '' === $prefix || 'sidebars_widgets' === $option_name ) {
 		return false;
 	}
@@ -1390,14 +1441,15 @@ function tsosi_scan_rows_for_option_name( $option_name, $needles, $context, $edi
 }
 
 /**
- * Active widget instances listed in sidebars_widgets.
+ * Active widget instances listed in sidebars_widgets. The context label is always
+ * "Active widget in sidebar" (hardcoded below, not caller-configurable) because that's
+ * what genuinely distinguishes this from a generic widget-option match.
  *
  * @param array<string,mixed> $needles  Needles.
- * @param string              $context  Context.
  * @param string              $edit_url Edit URL.
  * @return array<int,array<string,mixed>>
  */
-function tsosi_scan_active_widget_instances( $needles, $context, $edit_url ) {
+function tsosi_scan_active_widget_instances( $needles, $edit_url ) {
 	$prefixes = isset( $needles['option_prefixes'] ) && is_array( $needles['option_prefixes'] )
 		? $needles['option_prefixes']
 		: array();
@@ -1510,8 +1562,8 @@ function tsosi_scan_non_autoload_options( $needles ) {
 				'context'        => $ctx,
 				'edit_url'       => '',
 			);
-			$value = get_option( $option_name );
-			$blob  = tsosi_scan_value_to_blob( $value );
+			$value                = get_option( $option_name );
+			$blob                 = tsosi_scan_value_to_blob( $value );
 			if ( strlen( $blob ) > 500000 ) {
 				continue;
 			}
@@ -1614,10 +1666,15 @@ function tsosi_scan_blob_for_blocks( $blob, $blocks ) {
 	$present = array_unique( array_map( 'tsosi_sanitize_block_name', $matches[1] ) );
 	foreach ( $blocks as $block_name ) {
 		$block_name = tsosi_sanitize_block_name( (string) $block_name );
-		$block_root = strstr( $block_name, '/', true );
-		if ( false === $block_root ) {
-			$block_root = $block_name;
-		}
+		// Only fall back to a namespace-root match ("acme/*") when the needle itself
+		// has no slash -- same reasoning as tsosi_scan_content_for_blocks(). Unlike
+		// that version, this one used to always derive $block_root from the text
+		// before the first "/" even when the needle already had a full
+		// "namespace/block" name, so searching for the specific block
+		// "acme/hero-banner" in a widget/wp_options blob also matched an unrelated
+		// sibling block like "acme/footer" from the same namespace.
+		$has_slash  = false !== strpos( $block_name, '/' );
+		$block_root = $has_slash ? '' : $block_name;
 		foreach ( $present as $candidate ) {
 			if (
 				$candidate === $block_name
@@ -1699,14 +1756,14 @@ function tsosi_scan_make_result( $post, $match_type, $match_value, $context ) {
 	$edit_link = tsosi_scan_get_edit_url( $post );
 
 	return array(
-		'source_type'  => 'post',
-		'object_id'    => $post_id,
-		'object_label' => '' !== $title ? $title : '#' . $post_id,
+		'source_type'    => 'post',
+		'object_id'      => $post_id,
+		'object_label'   => '' !== $title ? $title : '#' . $post_id,
 		'object_subtype' => sanitize_key( $type ),
-		'match_type'   => sanitize_key( $match_type ),
-		'match_value'  => sanitize_text_field( (string) $match_value ),
-		'context'      => sanitize_text_field( (string) $context ),
-		'edit_url'     => $edit_link,
+		'match_type'     => sanitize_key( $match_type ),
+		'match_value'    => sanitize_text_field( (string) $match_value ),
+		'context'        => sanitize_text_field( (string) $context ),
+		'edit_url'       => $edit_link,
 	);
 }
 
@@ -1803,7 +1860,7 @@ function tsosi_get_block_inventory() {
 		foreach ( (array) $profile['blocks'] as $block_name ) {
 			$clean = tsosi_sanitize_block_name( (string) $block_name );
 			if ( '' !== $clean ) {
-				$plugin_map[ $clean ] = true;
+				$plugin_map[ $clean ]     = true;
 				$registered_map[ $clean ] = true;
 			}
 		}
