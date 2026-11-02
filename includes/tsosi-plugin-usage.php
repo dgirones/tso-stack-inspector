@@ -1041,12 +1041,13 @@ function tsosi_usage_frontend_urls() {
  *
  * @param string[] $urls   Pages to read (the first one is always attempted).
  * @param float    $budget Seconds allowed for the whole batch.
- * @return array{html:array<string,string>,failed:int,planned:int,skipped:int,complete:bool}
+ * @return array{html:array<string,string>,failed:int,missing:int,planned:int,skipped:int,complete:bool}
  */
 function tsosi_usage_frontend_read( $urls, $budget ) {
 	$out     = array(
 		'html'     => array(),
 		'failed'   => 0,
+		'missing'  => 0,
 		'planned'  => count( (array) $urls ),
 		'skipped'  => 0,
 		'complete' => false,
@@ -1066,7 +1067,18 @@ function tsosi_usage_frontend_read( $urls, $budget ) {
 				'headers'     => array( 'Cache-Control' => 'no-cache' ),
 			)
 		);
-		if ( is_wp_error( $response ) || 200 !== (int) wp_remote_retrieve_response_code( $response ) ) {
+		if ( is_wp_error( $response ) ) {
+			++$out['failed'];
+			continue;
+		}
+		$code = (int) wp_remote_retrieve_response_code( $response );
+		// A published page that answers 404/410 (e.g. a leftover "404" page) is not content a
+		// visitor reads: it neither proves nor hides anything, so it does not make the read incomplete.
+		if ( 404 === $code || 410 === $code ) {
+			++$out['missing'];
+			continue;
+		}
+		if ( 200 !== $code ) {
 			++$out['failed'];
 			continue;
 		}
@@ -1077,7 +1089,8 @@ function tsosi_usage_frontend_read( $urls, $budget ) {
 		}
 		$out['html'][ $url ] = str_replace( '\\/', '/', $body );
 	}
-	// "Complete" means every planned page was read: only then can silence be read as absence.
+	// "Complete" means every planned page that exists was read (no timeouts, errors or access denied,
+	// none skipped by the time budget): only then can silence be read as absence.
 	$out['complete'] = ! empty( $out['html'] ) && 0 === $out['failed'] && 0 === $out['skipped'];
 	return $out;
 }
