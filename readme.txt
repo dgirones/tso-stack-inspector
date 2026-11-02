@@ -107,27 +107,12 @@ No data is transmitted to external servers. Scans run only when an administrator
 == Changelog ==
 
 = 1.0.4 =
-* Replace refuses to edit content when the undo backup cannot be saved; backup and history file names are now harder to guess
-* Scan steps no longer process the same posts twice when two requests overlap (tab + background scan)
-* Fixed plugin deep links (preselected plugin on the Stack Inspector and Options Cleaner links) being double-encoded
-* Uninstall now also removes leftover lock files so the uploads folder is cleaned completely
-* Orphan finder no longer looks up the title of every indexed post (much faster on large sites)
-* Cancelling a scan no longer shows a false "No scan in progress" error; Replace preview/apply/undo and Cancel recover from network errors instead of freezing
-* Runtime block detection by editor script handle now matches by plugin slug instead of never matching
-* A plugin that is merely activated is no longer reported as "do not uninstall": only real usage (content, code calling it, tables with data, post types, etc.) blocks the verdict, and the message now says to deactivate, check the site and uninstall
-* Log options of other plugins (for example slow-query logs) are no longer reported as shortcode matches
-* WordPress/PHP constants (SAVEQUERIES, MB_CASE_*) are no longer reported as "other code calls this plugin"
-* Plugin scans now check the public site (home page and latest posts) for files and markup of the plugin, so plugins that add their output with filters and no shortcode (share buttons, cookie banners, SEO tags) are reported as in use
-* When a plugin is in use on the public site, the verdict lists the files and class names found and the page where each one was seen
-* Code of other plugins is no longer reported as "calling" this plugin when it only sits in bundled libraries (vendor folders), in the Free/Pro edition of the same plugin, inside quotes (name lists) or is a method with the same name
-* Sitemaps, robots.txt and feeds are checked too: a plugin that generates them (XML sitemap generators, SEO plugins) is reported as in use
-* A drop-in or mu-plugin that mentions a plugin (for example Query Monitor's own db.php) is now a review notice, not a "do not uninstall"; plugins hooking page output are only flagged when their output cannot be found on the public pages
-* "Clean leftovers in Options Cleaner" is no longer offered while the scanned plugin is still active
-* The verdict now shows only the reasons that matter (content, widgets, public output, real configuration); technical details such as hooks, AJAX or cron callbacks are no longer listed
-* Classic Editor is reported as in use when posts or the whole site are set to the classic editor, One User Avatar when users have avatars set with it, and UpdraftPlus / Options & Tables Cleaner warn when automatic backups or scheduled cleaning are active
-* The site's own domain no longer counts as proof that a plugin by the same author is in use
-* Custom post types registered by other plugins are no longer attributed to Stack Inspector
-* Plugins that hook into the output of public pages are flagged for review, and the verdict says when the public pages could not be read
+* Replace refuses to edit content when the undo backup cannot be saved, and backup/history file names are harder to guess; Replace and Cancel now recover from network errors instead of freezing
+* Faster, more reliable scans: no posts processed twice when two requests overlap, much faster orphan finder, fixed double-encoded plugin links, and uninstall also removes leftover lock files
+* A merely activated plugin is no longer reported as "do not uninstall": only real usage (content, widgets, code calling it, tables with data, post types, scheduled tasks, dependencies, public output) blocks the verdict
+* The public site check now reads a sample of pages (home, latest posts and page, shop pages, one entry and archive per content type, one page per template) plus sitemaps, robots.txt and feeds, and lists the files and class names found and where
+* New: the verdict is graded with a priority (low/medium/high) and a confidence level (high/medium/low) with the reason, indirect hints are labelled, and widgets left in the inactive area and old non-public post types are reported with their volume and last edit date
+* Fewer false positives (log options and constants of other plugins, bundled libraries, Free/Pro editions, drop-ins, mu-plugins, the site's own domain) and new checks for Classic Editor, One User Avatar, UpdraftPlus and Options & Tables Cleaner
 
 = 1.0.3 =
 * An active plugin is no longer reported as "likely safe to uninstall": new "in use" checks (hooks, cron, REST, post types, taxonomies, tables, dependencies, theme and other plugins) also used by the inactive audit and theme scan
