@@ -20,6 +20,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+// Weights and confidence of the verdict. Loaded here so this file never runs without them.
+require_once TSOSI_PATH . 'includes/tsosi-usage-verdict.php';
+
 if ( ! defined( 'TSOSI_USAGE_CROSS_TIME_BUDGET' ) ) {
 	define( 'TSOSI_USAGE_CROSS_TIME_BUDGET', 6.0 );
 }
