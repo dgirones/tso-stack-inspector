@@ -1458,6 +1458,61 @@ function tsosi_scan_get_widget_sidebar_map() {
 }
 
 /**
+ * Widget instances that are NOT shown on the site: the "Inactive widgets" area, and any
+ * sidebar the active theme no longer registers (e.g. after a theme switch).
+ *
+ * @return array<string,string> Instance id => sidebar id.
+ */
+function tsosi_scan_get_inactive_widget_map() {
+	$sidebars = get_option( 'sidebars_widgets', array() );
+	$map      = array();
+	if ( ! is_array( $sidebars ) ) {
+		return $map;
+	}
+	global $wp_registered_sidebars;
+	$registered = is_array( $wp_registered_sidebars ) ? $wp_registered_sidebars : array();
+
+	foreach ( $sidebars as $sidebar_id => $widget_ids ) {
+		if ( ! is_array( $widget_ids ) ) {
+			continue;
+		}
+		if ( 'wp_inactive_widgets' !== $sidebar_id && isset( $registered[ $sidebar_id ] ) ) {
+			continue;
+		}
+		foreach ( $widget_ids as $widget_id ) {
+			if ( is_string( $widget_id ) && '' !== $widget_id ) {
+				$map[ $widget_id ] = (string) $sidebar_id;
+			}
+		}
+	}
+	return $map;
+}
+
+/**
+ * Instances of the plugin's widgets that sit in an inactive area.
+ *
+ * @param string[] $prefixes Option / widget id_base prefixes of the plugin.
+ * @return string[] Instance ids (e.g. "myplugin_widget-3").
+ */
+function tsosi_scan_inactive_widget_instances( $prefixes ) {
+	// WordPress core widgets share generic names ("search", "text"...): never attribute them to a plugin.
+	$core_bases = array( 'archives', 'audio', 'block', 'calendar', 'categories', 'custom_html', 'media_audio', 'media_gallery', 'media_image', 'media_video', 'meta', 'nav_menu', 'pages', 'recent-comments', 'recent-posts', 'rss', 'search', 'tag_cloud', 'text' );
+	$found      = array();
+	foreach ( tsosi_scan_get_inactive_widget_map() as $instance_id => $sidebar_id ) {
+		if ( in_array( preg_replace( '/-\d+$/', '', (string) $instance_id ), $core_bases, true ) ) {
+			continue;
+		}
+		foreach ( (array) $prefixes as $prefix ) {
+			if ( tsosi_scan_option_name_matches_prefix( (string) $instance_id, (string) $prefix ) ) {
+				$found[] = (string) $instance_id;
+				break;
+			}
+		}
+	}
+	return $found;
+}
+
+/**
  * Human-readable sidebar name.
  *
  * @param string $sidebar_id Sidebar ID.

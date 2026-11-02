@@ -84,6 +84,13 @@ foreach ($name in $funcHits.Keys) {
 if ($Fail -eq 0) { Write-Ok 'No duplicate functions' }
 
 if (-not $PhpLintOnly) {
+    $testRunner = Join-Path $Root 'tests\run.php'
+    if ((Test-Path $testRunner) -and $phpCmd) {
+        Write-Step 'Unit tests (php tests/run.php)'
+        & php $testRunner
+        if ($LASTEXITCODE -ne 0) { Write-Fail 'Unit tests failed' } else { Write-Ok 'Unit tests' }
+    }
+
     Write-Step 'Direct $_POST/$_GET outside storage helpers'
     foreach ($f in $PhpFiles) {
         $leaf = Split-Path $f.FullName -Leaf
@@ -99,7 +106,7 @@ if (-not $PhpLintOnly) {
     $phpcs = Get-Command phpcs -ErrorAction SilentlyContinue
     if ($phpcs) {
         Write-Step 'PHPCS WordPress standard'
-        & phpcs --standard=WordPress --extensions=php $Root
+        & phpcs --standard=WordPress --extensions=php --ignore='*/tests/*' $Root
         if ($LASTEXITCODE -ne 0) { $Fail = 1 } else { Write-Ok 'PHPCS' }
     } else {
         Write-Host 'WARN: phpcs not in PATH - skipped.' -ForegroundColor Yellow

@@ -392,6 +392,7 @@ function tsosi_audit_inactive_plugins() {
 			'risk_level'    => (string) $risk['level'],
 			'risk_label'    => (string) $risk['label'] . ( ! empty( $risk['reasons'] ) ? ' — ' . implode( '; ', array_slice( (array) $risk['reasons'], 0, 4 ) ) : '' ),
 			'reasons'       => isset( $risk['reasons'] ) ? array_values( (array) $risk['reasons'] ) : array(),
+			'confidence'    => isset( $risk['confidence'] ) ? (string) $risk['confidence'] : '',
 			'needles_empty' => $empty && empty( $risk['reasons'] ),
 			'scan_url'      => add_query_arg(
 				array(
