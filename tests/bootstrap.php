@@ -41,6 +41,8 @@ class Tsosi_Test_Wpdb {
 	public $posts = 'wp_posts';
 	/** @var string */
 	public $term_taxonomy = 'wp_term_taxonomy';
+	/** @var string */
+	public $postmeta = 'wp_postmeta';
 	/** @var array<string,array<int,array<string,mixed>>> */
 	public $rows = array();
 
@@ -64,6 +66,15 @@ class Tsosi_Test_Wpdb {
 	public function get_results( $query ) {
 		$type = substr( (string) $query, 5 );
 		return isset( $this->rows[ $type ] ) ? $this->rows[ $type ] : array();
+	}
+
+	/**
+	 * Canned single column (page templates).
+	 *
+	 * @return array<int,string>
+	 */
+	public function get_col() {
+		return isset( $GLOBALS['tsosi_test']['templates'] ) ? $GLOBALS['tsosi_test']['templates'] : array();
 	}
 
 	/**
@@ -122,6 +133,20 @@ function get_post_types() {
 }
 function get_taxonomies() {
 	return array( 'category' );
+}
+function home_url( $path = '' ) {
+	return 'https://x.test' . $path;
+}
+function get_posts( $args ) {
+	$type = is_array( $args['post_type'] ) ? $args['post_type'][0] : $args['post_type'];
+	$all  = isset( $GLOBALS['tsosi_test']['posts'][ $type ] ) ? $GLOBALS['tsosi_test']['posts'][ $type ] : array();
+	return array_slice( $all, 0, (int) $args['posts_per_page'] );
+}
+function get_permalink( $id ) {
+	return 'https://x.test/?p=' . $id;
+}
+function get_post_type_archive_link() {
+	return false;
 }
 function wp_remote_get( $url ) {
 	$http = $GLOBALS['tsosi_test']['http'];

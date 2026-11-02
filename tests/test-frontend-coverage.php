@@ -141,3 +141,21 @@ tsosi_test(
 		tsosi_assert_same( array( '/contact/' ), $hits['where']['markers|myform-wrap'] );
 	}
 );
+
+tsosi_test(
+	'candidates take the latest posts and the latest page separately (pages newer than posts)',
+	function () {
+		$GLOBALS['tsosi_test']['posts']     = array(
+			'post' => array( 11, 12, 13 ),
+			'page' => array( 21, 22 ),
+		);
+		$GLOBALS['tsosi_test']['templates'] = array( '31' );
+		$groups = tsosi_usage_frontend_candidates();
+		tsosi_assert_same( array( 'https://x.test/?p=11', 'https://x.test/?p=12', 'https://x.test/?p=21' ), $groups['latest'] );
+		tsosi_assert_same( array( 'https://x.test/?p=31' ), $groups['templates'] );
+		tsosi_assert_same( array( 'https://x.test/' ), $groups['home'] );
+		$plan = tsosi_usage_frontend_plan( $groups, 12 );
+		tsosi_assert_same( 5, count( $plan ) );
+		tsosi_assert_same( 'https://x.test/', $plan[0], 'home first' );
+	}
+);

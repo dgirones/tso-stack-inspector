@@ -936,24 +936,31 @@ function tsosi_usage_frontend_candidates() {
 		'templates' => array(),
 	);
 
-	$posts = get_posts(
-		array(
-			'post_type'              => array( 'post', 'page' ),
-			'post_status'            => 'publish',
-			'has_password'           => false,
-			'posts_per_page'         => 2,
-			'orderby'                => 'date',
-			'order'                  => 'DESC',
-			'fields'                 => 'ids',
-			'no_found_rows'          => true,
-			'update_post_meta_cache' => false,
-			'update_post_term_cache' => false,
-		)
-	);
-	foreach ( (array) $posts as $post_id ) {
-		$link = get_permalink( (int) $post_id );
-		if ( is_string( $link ) && '' !== $link ) {
-			$groups['latest'][] = $link;
+	// The 2 latest posts and the latest page, asked separately: when pages are newer than the
+	// posts, one mixed "latest 2" query would leave every blog post out of the sample.
+	foreach ( array(
+		'post' => 2,
+		'page' => 1,
+	) as $type => $limit ) {
+		$ids = get_posts(
+			array(
+				'post_type'              => $type,
+				'post_status'            => 'publish',
+				'has_password'           => false,
+				'posts_per_page'         => $limit,
+				'orderby'                => 'date',
+				'order'                  => 'DESC',
+				'fields'                 => 'ids',
+				'no_found_rows'          => true,
+				'update_post_meta_cache' => false,
+				'update_post_term_cache' => false,
+			)
+		);
+		foreach ( (array) $ids as $post_id ) {
+			$link = get_permalink( (int) $post_id );
+			if ( is_string( $link ) && '' !== $link ) {
+				$groups['latest'][] = $link;
+			}
 		}
 	}
 
