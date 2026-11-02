@@ -450,6 +450,26 @@
 		showScanActions(true);
 	}
 
+	function confidenceName(level) {
+		var names = {
+			high: i18n.confidenceHigh || 'High',
+			medium: i18n.confidenceMedium || 'Medium',
+			low: i18n.confidenceLow || 'Low'
+		};
+		return names[level] || '';
+	}
+
+	// How much to trust the verdict (server-computed in tsosi-usage-verdict.php), with the reason.
+	function confidenceLine(risk) {
+		var level = risk && risk.confidence ? String(risk.confidence) : '';
+		if (['high', 'medium', 'low'].indexOf(level) === -1) {
+			return '';
+		}
+		return '<p class="tsosi-risk-confidence"><span class="tsosi-confidence-pill tsosi-confidence-' + escapeAttr(level) + '">' +
+			escapeHtml((i18n.confidenceLabel || 'Confidence') + ': ' + confidenceName(level)) + '</span>' +
+			(risk.confidence_note ? ' <span class="tsosi-risk-help">' + escapeHtml(risk.confidence_note) + '</span>' : '') + '</p>';
+	}
+
 	function renderRiskBanner(risk, results, meta) {
 		var el = qs('#tsosi-risk-banner');
 		if (!el) {
@@ -473,6 +493,11 @@
 		var mainHtml =
 			'<strong>' + escapeHtml(risk.label || '') + '</strong>' +
 			(risk.help ? '<span class="tsosi-risk-help">' + escapeHtml(risk.help) + '</span>' : '');
+
+		var confidenceHtml = confidenceLine(risk);
+		if (confidenceHtml) {
+			mainHtml += confidenceHtml;
+		}
 
 		var cleanerUrl = meta.cleaner_url || '';
 		var cleanerAvailable = meta.cleaner_available;
@@ -536,6 +561,17 @@
 	// "Other signs that the plugin is in use": activation state, hooks, post types, tables,
 	// dependencies, code references... (server-built in tsosi-plugin-usage.php, already
 	// translated). Always shown for plugin scans so a green verdict also lists what was checked.
+	// Tag the signals that are not direct evidence, so a hint is not mistaken for proof.
+	function usageKindTag(sig) {
+		var text = '';
+		if (sig.kind === 'inferred') {
+			text = i18n.kindInferred || 'Indirect hint';
+		} else if (sig.kind === 'unverified') {
+			text = i18n.kindUnverified || 'Not verified';
+		}
+		return text ? '<span class="tsosi-usage-kind">' + escapeHtml(text) + '</span>' : '';
+	}
+
 	function renderUsagePanel(usage) {
 		if (!usage || !usage.signals) {
 			return '';
@@ -554,7 +590,8 @@
 				var sev = String(sig.severity || 'info');
 				html += '<li class="tsosi-usage-item tsosi-usage-' + escapeAttr(sev) + '">' +
 					'<span class="tsosi-usage-dot" aria-hidden="true"></span>' +
-					'<span class="tsosi-usage-label">' + escapeHtml(sig.label || '') + '</span>';
+					'<span class="tsosi-usage-label">' + escapeHtml(sig.label || '') + '</span>' +
+					usageKindTag(sig);
 				if (sig.items && sig.items.length) {
 					html += '<details class="tsosi-usage-more"><summary>' + escapeHtml((i18n.usageDetails || 'Details') + ' (' + String(sig.items.length + (sig.more || 0)) + ')') + '</summary><ul>';
 					sig.items.forEach(function (item) {
@@ -1331,6 +1368,15 @@
 	// found either way, but showing the same green "Safe" pill for both would let a user
 	// delete an unidentifiable plugin thinking it was verified clean). rowTitle, when
 	// given, becomes a title attribute carrying the exact server-computed risk_label.
+	// Tooltip of an audit row: the server-computed label plus how much to trust it.
+	function auditRowTitle(row) {
+		var title = row.risk_label || '';
+		if (row.confidence) {
+			title += ' — ' + (i18n.confidenceLabel || 'Confidence') + ': ' + confidenceName(String(row.confidence));
+		}
+		return title;
+	}
+
 	function riskBadge(level, needlesEmpty, rowTitle) {
 		var label = i18n.riskSafe || 'Safe';
 		var cssLevel = level || 'safe';
@@ -1392,7 +1438,7 @@
 					'<td>' + escapeHtml(String(row.match_count || 0)) +
 					(row.content || row.data ? ' <span class="description">(' + escapeHtml(String(row.content || 0)) + ' content / ' + escapeHtml(String(row.data || 0)) + ' data)</span>' : '') +
 					'</td>' +
-					'<td>' + riskBadge(row.risk_level, row.needles_empty, row.risk_label) + '</td>' +
+					'<td>' + riskBadge(row.risk_level, row.needles_empty, auditRowTitle(row)) + '</td>' +
 					'<td><a class="button button-small" href="' + escapeAttr(row.scan_url || '#') + '">' +
 					escapeHtml(i18n.auditOpenScan || 'Open scan') + '</a></td>' +
 					'</tr>';

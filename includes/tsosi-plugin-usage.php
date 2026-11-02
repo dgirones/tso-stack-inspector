@@ -53,10 +53,14 @@ if ( ! defined( 'TSOSI_USAGE_STALE_DAYS' ) ) {
  * @return array<string,mixed>
  */
 function tsosi_usage_signal( $id, $severity, $label, $items = array(), $summary = '' ) {
-	$items = array_values( array_unique( array_filter( array_map( 'strval', (array) $items ) ) ) );
+	$items    = array_values( array_unique( array_filter( array_map( 'strval', (array) $items ) ) ) );
+	$severity = in_array( $severity, array( 'danger', 'review', 'info' ), true ) ? $severity : 'info';
+	$profile  = tsosi_usage_signal_profile( $id, $severity );
 	return array(
 		'id'       => sanitize_key( $id ),
-		'severity' => in_array( $severity, array( 'danger', 'review', 'info' ), true ) ? $severity : 'info',
+		'severity' => $severity,
+		'weight'   => $profile['weight'],
+		'kind'     => $profile['kind'],
 		'label'    => $label,
 		'summary'  => '' !== $summary ? $summary : $label,
 		'items'    => array_slice( $items, 0, 12 ),
@@ -2469,10 +2473,11 @@ function tsosi_usage_signals_from_corpus( $hits ) {
 function tsosi_usage_collect( $plugin_file, $args = array() ) {
 	$plugin_file = tsosi_sanitize_plugin_file( $plugin_file );
 	$out         = array(
-		'signals' => array(),
-		'active'  => false,
-		'title'   => tsosi_ui_triple_text( 'Usage signals found (red/amber ones block uninstalling; grey ones are informational)', 'Señales de uso encontradas (las rojas/ámbar impiden desinstalar; las grises son informativas)', 'Senyals d\'ús trobats (els vermells/ambre impedeixen desinstal·lar; els grisos són informatius)' ),
-		'checked' => array(),
+		'signals'  => array(),
+		'active'   => false,
+		'coverage' => array(),
+		'title'    => tsosi_ui_triple_text( 'Usage signals found (red/amber ones block uninstalling; grey ones are informational)', 'Señales de uso encontradas (las rojas/ámbar impiden desinstalar; las grises son informativas)', 'Senyals d\'ús trobats (els vermells/ambre impedeixen desinstal·lar; els grisos són informatius)' ),
+		'checked'  => array(),
 	);
 	if ( '' === $plugin_file ) {
 		return $out;
@@ -2515,6 +2520,17 @@ function tsosi_usage_collect( $plugin_file, $args = array() ) {
 	}
 	$signals = array_merge( $signals, tsosi_usage_signals_from_corpus( $hits ) );
 
+	// What was actually looked at: a clean result is only as good as its coverage.
+	$front_cover = 'na';
+	if ( tsosi_is_plugin_active_file( $plugin_file ) ) {
+		$snapshot    = tsosi_usage_frontend_snapshot();
+		$front_cover = ! empty( $snapshot['complete'] ) ? 'complete' : 'partial';
+	}
+	$out['coverage'] = array(
+		'front' => $front_cover,
+		'code'  => ! empty( $hits['partial'] ) ? 'partial' : 'complete',
+	);
+
 	$order = array(
 		'danger' => 0,
 		'review' => 1,
@@ -2547,25 +2563,43 @@ function tsosi_usage_collect( $plugin_file, $args = array() ) {
  * Merge usage signals into a scan risk. A plugin that is running, or that other code or
  * content depends on, is never reported as "safe to uninstall".
  *
+ * Danger signals always block. Review signals never escalate to danger by themselves; their
+ * summed weight only sets the priority of the review and the order of the reasons. The
+ * result also carries how much to trust the verdict (confidence) and why.
+ *
  * @param array<string,mixed> $risk  Risk from tsosi_scan_assess_risk().
  * @param array<string,mixed> $usage Result of tsosi_usage_collect().
  * @return array<string,mixed>
  */
 function tsosi_usage_apply_risk( $risk, $usage ) {
-	$signals = isset( $usage['signals'] ) && is_array( $usage['signals'] ) ? $usage['signals'] : array();
-	$danger  = array();
-	$review  = array();
+	$signals    = isset( $usage['signals'] ) && is_array( $usage['signals'] ) ? $usage['signals'] : array();
+	$coverage   = isset( $usage['coverage'] ) && is_array( $usage['coverage'] ) ? $usage['coverage'] : array();
+	$base_level = isset( $risk['level'] ) ? (string) $risk['level'] : 'safe';
+	$danger     = array();
+	$review     = array();
 	foreach ( $signals as $signal ) {
 		if ( 'danger' === $signal['severity'] ) {
-			$danger[] = $signal['summary'];
+			$danger[] = $signal;
 		} elseif ( 'review' === $signal['severity'] ) {
-			$review[] = $signal['summary'];
+			$review[] = $signal;
 		}
+	}
+	$review = tsosi_usage_sort_by_weight( $review );
+	$score  = 0;
+	foreach ( $review as $signal ) {
+		$profile = tsosi_usage_signal_profile( $signal['id'], 'review' );
+		$score  += $profile['weight'];
 	}
 
 	$risk['usage_danger'] = count( $danger );
 	$risk['usage_review'] = count( $review );
-	$risk['reasons']      = array_values( array_merge( $danger, $review ) );
+	$risk['reasons']      = array_values( array_merge( wp_list_pluck( $danger, 'summary' ), wp_list_pluck( $review, 'summary' ) ) );
+	$risk['score']        = $score;
+	$risk['priority']     = '';
+
+	$confidence              = tsosi_usage_confidence( $base_level, $danger, $review, $coverage );
+	$risk['confidence']      = $confidence['level'];
+	$risk['confidence_note'] = $confidence['note'];
 
 	if ( empty( $danger ) && empty( $review ) ) {
 		// Activated, but nothing depends on it: say so instead of implying it is in use.
@@ -2576,7 +2610,7 @@ function tsosi_usage_apply_risk( $risk, $usage ) {
 				break;
 			}
 		}
-		if ( $is_active && isset( $risk['level'] ) && 'safe' === $risk['level'] ) {
+		if ( $is_active && 'safe' === $base_level ) {
 			$risk['label'] = tsosi_ui_triple_text(
 				'No real usage found. The plugin is only activated: deactivate it, check the site and then uninstall',
 				'No se encontró uso real. El plugin solo está activado: desactívalo, comprueba el sitio y luego desinstala',
@@ -2599,13 +2633,28 @@ function tsosi_usage_apply_risk( $risk, $usage ) {
 	}
 
 	// Only "review" level traces.
-	if ( 'safe' === $risk['level'] ) {
+	$risk['priority'] = tsosi_usage_score_priority( $score );
+	if ( 'safe' === $base_level ) {
 		$risk['level'] = 'review';
-		$risk['label'] = tsosi_ui_triple_text(
-			'No content found, but the plugin left other traces — review before uninstalling',
-			'No se encontró contenido, pero el plugin dejó otras huellas — revisa antes de desinstalar',
-			'No s\'ha trobat contingut, però el plugin ha deixat altres empremtes — revisa abans de desinstal·lar'
-		);
+		if ( 'low' === $risk['priority'] ) {
+			$risk['label'] = tsosi_ui_triple_text(
+				'Only minor traces left — low risk, but review them before uninstalling',
+				'Solo quedan huellas menores — riesgo bajo, pero revísalas antes de desinstalar',
+				'Només queden empremtes menors — risc baix, però revisa-les abans de desinstal·lar'
+			);
+		} elseif ( 'high' === $risk['priority'] ) {
+			$risk['label'] = tsosi_ui_triple_text(
+				'No content found, but the plugin left important traces — check them before uninstalling',
+				'No se encontró contenido, pero el plugin dejó huellas importantes — compruébalas antes de desinstalar',
+				'No s\'ha trobat contingut, però el plugin ha deixat empremtes importants — comprova-les abans de desinstal·lar'
+			);
+		} else {
+			$risk['label'] = tsosi_ui_triple_text(
+				'No content found, but the plugin left other traces — review before uninstalling',
+				'No se encontró contenido, pero el plugin dejó otras huellas — revisa antes de desinstalar',
+				'No s\'ha trobat contingut, però el plugin ha deixat altres empremtes — revisa abans de desinstal·lar'
+			);
+		}
 	}
 	$risk['total'] = (int) ( $risk['total'] ?? 0 ) + count( $review );
 	return $risk;

@@ -63,6 +63,7 @@ require_once TSOSI_PATH . 'includes/tsosi-scan-extended.php';
 require_once TSOSI_PATH . 'includes/tsosi-scan-cache.php';
 require_once TSOSI_PATH . 'includes/tsosi-scan-history.php';
 require_once TSOSI_PATH . 'includes/tsosi-plugin-usage.php';
+require_once TSOSI_PATH . 'includes/tsosi-usage-verdict.php';
 require_once TSOSI_PATH . 'includes/tsosi-scan-risk.php';
 require_once TSOSI_PATH . 'includes/tsosi-replace.php';
 require_once TSOSI_PATH . 'includes/tsosi-orphans.php';

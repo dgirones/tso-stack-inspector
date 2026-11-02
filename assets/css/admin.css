@@ -210,6 +210,39 @@
 	color: #50575e;
 }
 
+.tsosi-risk-banner .tsosi-risk-confidence {
+	margin: 2px 0 0;
+}
+
+.tsosi-confidence-pill {
+	display: inline-block;
+	padding: 1px 8px;
+	border: 1px solid currentColor;
+	border-radius: 10px;
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.tsosi-confidence-high {
+	color: #1a6b2f;
+}
+
+.tsosi-confidence-medium {
+	color: #8a6100;
+}
+
+.tsosi-confidence-low {
+	color: #8a2424;
+}
+
+.tsosi-usage-kind {
+	padding: 1px 8px;
+	border-radius: 10px;
+	background: rgba(0, 0, 0, 0.08);
+	font-size: 12px;
+	font-weight: 600;
+}
+
 .tsosi-risk-safe {
 	background: #edfaef;
 	border-color: #68de7c;
@@ -665,6 +698,10 @@ html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-risk-safe { background: #12281
 html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-risk-review { background: #2e2810; border-color: #b58a12; }
 html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-risk-danger { background: #331a1b; border-color: #d63638; }
 html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-risk-info { background: #16283a; border-color: #4a86c0; }
+html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-confidence-high { color: #6fdc8c; }
+html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-confidence-medium { color: #f0c33c; }
+html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-confidence-low { color: #ff8085; }
+html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-usage-kind { background: rgba(255, 255, 255, 0.12); }
 html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-risk-pill.tsosi-risk-safe { color: #6fdc8c; }
 html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-risk-pill.tsosi-risk-review { color: #f0c33c; }
 html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-risk-pill.tsosi-risk-danger { color: #ff8085; }

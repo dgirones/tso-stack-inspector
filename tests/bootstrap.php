@@ -135,6 +135,7 @@ function wp_remote_retrieve_body( $response ) {
 
 require_once __DIR__ . '/../includes/tsosi-i18n.php';
 require_once __DIR__ . '/../includes/tsosi-plugin-usage.php';
+require_once __DIR__ . '/../includes/tsosi-usage-verdict.php';
 require_once __DIR__ . '/../includes/tsosi-scanner.php';
 
 tsosi_test_reset();
