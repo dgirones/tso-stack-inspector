@@ -10,6 +10,7 @@
  */
 
 define( 'ABSPATH', __DIR__ . '/' );
+define( 'TSOSI_PATH', dirname( __DIR__ ) . '/' );
 define( 'TSOSI_VERSION', 'test' );
 define( 'TSOSI_USER_META_UI_LANG', 'tsosi_ui_lang' );
 define( 'DAY_IN_SECONDS', 86400 );
@@ -135,7 +136,6 @@ function wp_remote_retrieve_body( $response ) {
 
 require_once __DIR__ . '/../includes/tsosi-i18n.php';
 require_once __DIR__ . '/../includes/tsosi-plugin-usage.php';
-require_once __DIR__ . '/../includes/tsosi-usage-verdict.php';
 require_once __DIR__ . '/../includes/tsosi-scanner.php';
 
 tsosi_test_reset();
