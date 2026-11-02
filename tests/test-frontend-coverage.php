@@ -108,10 +108,11 @@ tsosi_test(
 	'hooks suspicion is relaxed only after a complete read',
 	function () {
 		$signals = array(
-			array( 'id' => 'frontend_hooks', 'severity' => 'review', 'label' => 'L', 'summary' => 'S' ),
+			array( 'id' => 'frontend_hooks', 'severity' => 'review', 'weight' => 2, 'label' => 'L', 'summary' => 'S' ),
 		);
 		$full    = tsosi_usage_relax_frontend_hooks( $signals, array( 'complete' => true ) );
 		tsosi_assert_same( 'info', $full[0]['severity'] );
+		tsosi_assert_same( 0, $full[0]['weight'], 'a relaxed signal no longer weighs anything' );
 		$partial = tsosi_usage_relax_frontend_hooks( $signals, array( 'complete' => false ) );
 		tsosi_assert_same( 'review', $partial[0]['severity'] );
 	}
