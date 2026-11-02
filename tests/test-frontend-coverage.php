@@ -49,15 +49,44 @@ tsosi_test(
 );
 
 tsosi_test(
-	'one failed page makes the read incomplete',
+	'a page that fails (server error, timeout, access denied) makes the read incomplete',
+	function () {
+		foreach ( array( 503, 403 ) as $code ) {
+			$GLOBALS['tsosi_test']['http'] = array(
+				'https://x.test/'  => array( 'code' => 200, 'body' => '<html>a</html>' ),
+				'https://x.test/p' => array( 'code' => $code, 'body' => 'nope' ),
+			);
+			$read = tsosi_usage_frontend_read( array( 'https://x.test/', 'https://x.test/p' ), 10.0 );
+			tsosi_assert_same( false, $read['complete'], "HTTP $code" );
+			tsosi_assert_same( 1, $read['failed'] );
+		}
+		$GLOBALS['tsosi_test']['http'] = array( 'https://x.test/' => array( 'code' => 200, 'body' => '<html>a</html>' ) );
+		$read = tsosi_usage_frontend_read( array( 'https://x.test/', 'https://x.test/timeout' ), 10.0 );
+		tsosi_assert_same( false, $read['complete'], 'transport error' );
+	}
+);
+
+tsosi_test(
+	'a published page that answers 404 does not make the read incomplete (seen on blog2: /404-2/)',
 	function () {
 		$GLOBALS['tsosi_test']['http'] = array(
-			'https://x.test/'  => array( 'code' => 200, 'body' => '<html>a</html>' ),
-			'https://x.test/p' => array( 'code' => 404, 'body' => 'nope' ),
+			'https://x.test/'      => array( 'code' => 200, 'body' => '<html>a</html>' ),
+			'https://x.test/404-2' => array( 'code' => 404, 'body' => 'not found' ),
 		);
-		$read = tsosi_usage_frontend_read( array( 'https://x.test/', 'https://x.test/p' ), 10.0 );
+		$read = tsosi_usage_frontend_read( array( 'https://x.test/', 'https://x.test/404-2' ), 10.0 );
+		tsosi_assert_same( true, $read['complete'] );
+		tsosi_assert_same( 1, $read['missing'] );
+		tsosi_assert_same( 0, $read['failed'] );
+		tsosi_assert_same( 1, count( $read['html'] ) );
+	}
+);
+
+tsosi_test(
+	'if every page is missing nothing was read, so the read is not complete',
+	function () {
+		$GLOBALS['tsosi_test']['http'] = array( 'https://x.test/' => array( 'code' => 404, 'body' => 'x' ) );
+		$read = tsosi_usage_frontend_read( array( 'https://x.test/' ), 10.0 );
 		tsosi_assert_same( false, $read['complete'] );
-		tsosi_assert_same( 1, $read['failed'] );
 	}
 );
 
@@ -110,5 +139,23 @@ tsosi_test(
 		tsosi_assert_same( array( '/wp-content/plugins/my-form/css/a.css' ), $hits['assets'] );
 		tsosi_assert_same( array( 'myform-wrap' ), $hits['markers'] );
 		tsosi_assert_same( array( '/contact/' ), $hits['where']['markers|myform-wrap'] );
+	}
+);
+
+tsosi_test(
+	'candidates take the latest posts and the latest page separately (pages newer than posts)',
+	function () {
+		$GLOBALS['tsosi_test']['posts']     = array(
+			'post' => array( 11, 12, 13 ),
+			'page' => array( 21, 22 ),
+		);
+		$GLOBALS['tsosi_test']['templates'] = array( '31' );
+		$groups = tsosi_usage_frontend_candidates();
+		tsosi_assert_same( array( 'https://x.test/?p=11', 'https://x.test/?p=12', 'https://x.test/?p=21' ), $groups['latest'] );
+		tsosi_assert_same( array( 'https://x.test/?p=31' ), $groups['templates'] );
+		tsosi_assert_same( array( 'https://x.test/' ), $groups['home'] );
+		$plan = tsosi_usage_frontend_plan( $groups, 12 );
+		tsosi_assert_same( 5, count( $plan ) );
+		tsosi_assert_same( 'https://x.test/', $plan[0], 'home first' );
 	}
 );
