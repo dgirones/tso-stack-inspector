@@ -1136,6 +1136,7 @@ function tsosi_usage_relax_frontend_hooks( $signals, $snapshot ) {
 	foreach ( $signals as $key => $signal ) {
 		if ( isset( $signal['id'] ) && 'frontend_hooks' === $signal['id'] && 'review' === $signal['severity'] ) {
 			$signals[ $key ]['severity'] = 'info';
+			$signals[ $key ]['weight']   = 0;
 			$signals[ $key ]['summary']  = $signals[ $key ]['label'];
 		}
 	}
