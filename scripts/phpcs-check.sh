@@ -20,9 +20,14 @@ if [[ -n "$DUPS" ]]; then
   done
 fi
 
+if [[ -f "$ROOT/tests/run.php" ]] && command -v php >/dev/null 2>&1; then
+  echo '==> Unit tests (php tests/run.php)'
+  php "$ROOT/tests/run.php" || FAIL=1
+fi
+
 if command -v phpcs >/dev/null 2>&1; then
   echo '==> PHPCS'
-  phpcs --standard=WordPress --extensions=php "$ROOT" || FAIL=1
+  phpcs --standard=WordPress --extensions=php --ignore='*/tests/*' "$ROOT" || FAIL=1
 fi
 
 bash "$ROOT/scripts/prefix-audit.sh" || FAIL=1

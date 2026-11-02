@@ -28,6 +28,20 @@ if ( ! defined( 'TSOSI_USAGE_CROSS_MAX_FILE_BYTES' ) ) {
 	define( 'TSOSI_USAGE_CROSS_MAX_FILE_BYTES', 300000 );
 }
 
+// Public pages read to look for a plugin's footprint, and the total time allowed for it.
+if ( ! defined( 'TSOSI_USAGE_FRONTEND_MAX_URLS' ) ) {
+	define( 'TSOSI_USAGE_FRONTEND_MAX_URLS', 12 );
+}
+
+if ( ! defined( 'TSOSI_USAGE_FRONTEND_TIME_BUDGET' ) ) {
+	define( 'TSOSI_USAGE_FRONTEND_TIME_BUDGET', 15.0 );
+}
+
+// A non-public content type untouched for this many days is "dormant" (stored data, not live content).
+if ( ! defined( 'TSOSI_USAGE_STALE_DAYS' ) ) {
+	define( 'TSOSI_USAGE_STALE_DAYS', 730 );
+}
+
 /**
  * Build one usage signal.
  *
@@ -863,13 +877,58 @@ function tsosi_usage_collect_known( $plugin_file ) {
 }
 
 /**
- * Public URLs used for the front-end check: the home page and the latest published
- * posts/pages (what visitors really get).
+ * Pick the pages to read, taking one from each group in turn so every kind of page
+ * (home, latest posts, shop, one entry per content type, archives, page templates) gets
+ * represented before the cap is reached.
  *
+ * @param array<string,string[]> $groups Group name => URLs, most representative first.
+ * @param int                    $max    Maximum number of URLs.
  * @return string[]
  */
-function tsosi_usage_frontend_urls() {
-	$urls  = array( home_url( '/' ) );
+function tsosi_usage_frontend_plan( $groups, $max ) {
+	$max  = max( 1, (int) $max );
+	$plan = array();
+	$seen = array();
+	$more = true;
+	for ( $round = 0; $more && count( $plan ) < $max; $round++ ) {
+		$more = false;
+		foreach ( (array) $groups as $urls ) {
+			$urls = array_values( (array) $urls );
+			if ( ! isset( $urls[ $round ] ) ) {
+				continue;
+			}
+			$more = true;
+			$url  = (string) $urls[ $round ];
+			if ( '' === $url || isset( $seen[ $url ] ) ) {
+				continue;
+			}
+			$seen[ $url ] = true;
+			$plan[]       = $url;
+			if ( count( $plan ) >= $max ) {
+				break;
+			}
+		}
+	}
+	return $plan;
+}
+
+/**
+ * Candidate public pages grouped by kind. The group order is the priority order.
+ *
+ * @return array<string,string[]>
+ */
+function tsosi_usage_frontend_candidates() {
+	global $wpdb;
+
+	$groups = array(
+		'home'      => array( home_url( '/' ) ),
+		'latest'    => array(),
+		'shop'      => array(),
+		'types'     => array(),
+		'archives'  => array(),
+		'templates' => array(),
+	);
+
 	$posts = get_posts(
 		array(
 			'post_type'              => array( 'post', 'page' ),
@@ -887,28 +946,110 @@ function tsosi_usage_frontend_urls() {
 	foreach ( (array) $posts as $post_id ) {
 		$link = get_permalink( (int) $post_id );
 		if ( is_string( $link ) && '' !== $link ) {
-			$urls[] = $link;
+			$groups['latest'][] = $link;
 		}
 	}
-	return array_values( array_unique( $urls ) );
+
+	// Shop, cart, checkout and account pages hold most of what a store plugin outputs.
+	if ( function_exists( 'wc_get_page_id' ) ) {
+		foreach ( array( 'shop', 'cart', 'checkout', 'myaccount' ) as $page ) {
+			$page_id = (int) wc_get_page_id( $page );
+			$link    = $page_id > 0 ? get_permalink( $page_id ) : '';
+			if ( is_string( $link ) && '' !== $link ) {
+				$groups['shop'][] = $link;
+			}
+		}
+	}
+
+	// One entry (and the archive, when it has one) of every public custom content type.
+	$types = get_post_types(
+		array(
+			'public'   => true,
+			'_builtin' => false,
+		),
+		'names'
+	);
+	foreach ( array_slice( array_values( (array) $types ), 0, 10 ) as $type ) {
+		$entry = get_posts(
+			array(
+				'post_type'              => $type,
+				'post_status'            => 'publish',
+				'has_password'           => false,
+				'posts_per_page'         => 1,
+				'orderby'                => 'date',
+				'order'                  => 'DESC',
+				'fields'                 => 'ids',
+				'no_found_rows'          => true,
+				'update_post_meta_cache' => false,
+				'update_post_term_cache' => false,
+			)
+		);
+		if ( empty( $entry ) ) {
+			continue;
+		}
+		$link = get_permalink( (int) $entry[0] );
+		if ( is_string( $link ) && '' !== $link ) {
+			$groups['types'][] = $link;
+		}
+		$archive = get_post_type_archive_link( $type );
+		if ( is_string( $archive ) && '' !== $archive ) {
+			$groups['archives'][] = $archive;
+		}
+	}
+
+	// One published page for each custom page template in use.
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- bounded admin-only usage check.
+	$templates = $wpdb->get_col(
+		"SELECT MIN(p.ID) FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = '_wp_page_template' AND pm.meta_value NOT IN ('', 'default') AND p.post_type = 'page' AND p.post_status = 'publish' AND p.post_password = '' GROUP BY pm.meta_value LIMIT 10"
+	);
+	foreach ( (array) $templates as $page_id ) {
+		$link = get_permalink( (int) $page_id );
+		if ( is_string( $link ) && '' !== $link ) {
+			$groups['templates'][] = $link;
+		}
+	}
+
+	return $groups;
 }
 
 /**
- * HTML of the public pages as a visitor receives it (requests to this same site only,
- * nothing is sent to third parties). Read once per request.
+ * Public pages to read when looking for a plugin's footprint.
  *
- * @return array{html:array<string,string>,failed:int}
+ * @return string[]
  */
-function tsosi_usage_frontend_snapshot() {
-	static $memo = null;
-	if ( null !== $memo ) {
-		return $memo;
-	}
-	$memo = array(
-		'html'   => array(),
-		'failed' => 0,
+function tsosi_usage_frontend_urls() {
+	$urls = tsosi_usage_frontend_plan( tsosi_usage_frontend_candidates(), TSOSI_USAGE_FRONTEND_MAX_URLS );
+
+	/**
+	 * Filter the public pages read to detect plugin output.
+	 *
+	 * @param string[] $urls Absolute URLs of this site.
+	 */
+	$urls = apply_filters( 'tsosi_usage_frontend_urls', $urls );
+	return array_values( array_unique( array_filter( array_map( 'strval', (array) $urls ) ) ) );
+}
+
+/**
+ * Read a list of pages from this same site, one after another, within a time budget.
+ *
+ * @param string[] $urls   Pages to read (the first one is always attempted).
+ * @param float    $budget Seconds allowed for the whole batch.
+ * @return array{html:array<string,string>,failed:int,planned:int,skipped:int,complete:bool}
+ */
+function tsosi_usage_frontend_read( $urls, $budget ) {
+	$out     = array(
+		'html'     => array(),
+		'failed'   => 0,
+		'planned'  => count( (array) $urls ),
+		'skipped'  => 0,
+		'complete' => false,
 	);
-	foreach ( tsosi_usage_frontend_urls() as $url ) {
+	$started = microtime( true );
+	foreach ( array_values( (array) $urls ) as $i => $url ) {
+		if ( $i > 0 && ( microtime( true ) - $started ) >= $budget ) {
+			++$out['skipped'];
+			continue;
+		}
 		$response = wp_remote_get(
 			$url,
 			array(
@@ -919,17 +1060,59 @@ function tsosi_usage_frontend_snapshot() {
 			)
 		);
 		if ( is_wp_error( $response ) || 200 !== (int) wp_remote_retrieve_response_code( $response ) ) {
-			++$memo['failed'];
+			++$out['failed'];
 			continue;
 		}
 		$body = substr( (string) wp_remote_retrieve_body( $response ), 0, 400000 );
 		if ( '' === $body ) {
-			++$memo['failed'];
+			++$out['failed'];
 			continue;
 		}
-		$memo['html'][ $url ] = str_replace( '\\/', '/', $body );
+		$out['html'][ $url ] = str_replace( '\\/', '/', $body );
+	}
+	// "Complete" means every planned page was read: only then can silence be read as absence.
+	$out['complete'] = ! empty( $out['html'] ) && 0 === $out['failed'] && 0 === $out['skipped'];
+	return $out;
+}
+
+/**
+ * HTML of a sample of the public pages as a visitor receives it (requests to this same
+ * site only, nothing is sent to third parties). Read once per request.
+ *
+ * @return array{html:array<string,string>,failed:int,planned:int,skipped:int,complete:bool}
+ */
+function tsosi_usage_frontend_snapshot() {
+	static $memo = null;
+	if ( null === $memo ) {
+		$memo = tsosi_usage_frontend_read( tsosi_usage_frontend_urls(), TSOSI_USAGE_FRONTEND_TIME_BUDGET );
 	}
 	return $memo;
+}
+
+/**
+ * Lower "its hooks run on the front end" from review to info when the public pages were
+ * read in full and show nothing of the plugin. A partial read proves nothing, so the
+ * suspicion stays.
+ *
+ * @param array<int,array<string,mixed>> $signals  Usage signals.
+ * @param array<string,mixed>            $snapshot Result of tsosi_usage_frontend_snapshot().
+ * @return array<int,array<string,mixed>>
+ */
+function tsosi_usage_relax_frontend_hooks( $signals, $snapshot ) {
+	if ( empty( $snapshot['complete'] ) ) {
+		return $signals;
+	}
+	$ids = wp_list_pluck( $signals, 'id' );
+	if ( in_array( 'frontend_rendered', $ids, true ) || in_array( 'frontend_unavailable', $ids, true ) ) {
+		return $signals;
+	}
+	foreach ( $signals as $key => $signal ) {
+		if ( isset( $signal['id'] ) && 'frontend_hooks' === $signal['id'] && 'review' === $signal['severity'] ) {
+			$signals[ $key ]['severity'] = 'info';
+			$signals[ $key ]['summary']  = $signals[ $key ]['label'];
+		}
+	}
+	return $signals;
 }
 
 /**
@@ -1378,6 +1561,61 @@ function tsosi_usage_capture_owner( $kind, $name = '' ) {
 }
 
 /**
+ * Summarise the rows of one post type (status, count and last edit per status).
+ *
+ * Entries that are published, private or scheduled are "live". A type is "dormant" only
+ * when WordPress says it is not public and nothing in it has been edited for
+ * TSOSI_USAGE_STALE_DAYS: published entries of a public type are served at their own URLs
+ * however old they are, and a type that is not registered right now cannot be judged.
+ *
+ * @param array<int,array<string,mixed>> $rows        Rows with post_status, total and last_modified (GMT).
+ * @param object|null                    $type_object Post type object, null when not registered.
+ * @param int                            $now         Current timestamp.
+ * @return array{live:int,total:int,last:int,dormant:bool}
+ */
+function tsosi_usage_post_type_state( $rows, $type_object, $now ) {
+	$live  = 0;
+	$total = 0;
+	$last  = 0;
+	foreach ( (array) $rows as $row ) {
+		$count  = (int) $row['total'];
+		$total += $count;
+		if ( ! in_array( (string) $row['post_status'], array( 'publish', 'private', 'future' ), true ) ) {
+			continue;
+		}
+		$live += $count;
+		if ( ! empty( $row['last_modified'] ) ) {
+			$time = strtotime( (string) $row['last_modified'] . ' UTC' );
+			$last = $time && $time > $last ? $time : $last;
+		}
+	}
+	$non_public = is_object( $type_object ) && empty( $type_object->public ) && empty( $type_object->publicly_queryable );
+	$stale      = $last > 0 && ( $now - $last ) > TSOSI_USAGE_STALE_DAYS * DAY_IN_SECONDS;
+	return array(
+		'live'    => $live,
+		'total'   => $total,
+		'last'    => $last,
+		'dormant' => $live > 0 && $non_public && $stale,
+	);
+}
+
+/**
+ * Evidence line for a post type: name, volume and last edit date.
+ *
+ * @param string                                          $type  Post type.
+ * @param array{live:int,total:int,last:int,dormant:bool} $state State from tsosi_usage_post_type_state().
+ * @return string
+ */
+function tsosi_usage_post_type_line( $type, $state ) {
+	$count = $state['live'] > 0 ? $state['live'] : $state['total'];
+	$line  = $type . ' (' . $count;
+	if ( $state['live'] > 0 && $state['last'] > 0 ) {
+		$line .= ' · ' . gmdate( 'Y-m-d', $state['last'] );
+	}
+	return $line . ')';
+}
+
+/**
  * Custom post types and taxonomies owned by the plugin, and how much data they hold.
  *
  * @param string              $plugin_file Plugin basename.
@@ -1411,6 +1649,7 @@ function tsosi_usage_collect_content_types( $plugin_file, $facts, $owner_key = '
 
 	$signals   = array();
 	$published = array();
+	$dormant   = array();
 	$other     = array();
 	foreach ( $types as $type ) {
 		if ( '' === $type ) {
@@ -1419,23 +1658,21 @@ function tsosi_usage_collect_content_types( $plugin_file, $facts, $owner_key = '
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- bounded admin-only usage check.
 		$rows  = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT post_status, COUNT(*) AS total FROM {$wpdb->posts} WHERE post_type = %s AND post_status NOT IN ('auto-draft') GROUP BY post_status",
+				"SELECT post_status, COUNT(*) AS total, MAX(post_modified_gmt) AS last_modified FROM {$wpdb->posts} WHERE post_type = %s AND post_status NOT IN ('auto-draft') GROUP BY post_status",
 				$type
 			),
 			ARRAY_A
 		);
-		$live  = 0;
-		$total = 0;
-		foreach ( (array) $rows as $row ) {
-			$total += (int) $row['total'];
-			if ( in_array( (string) $row['post_status'], array( 'publish', 'private', 'future' ), true ) ) {
-				$live += (int) $row['total'];
+		$state = tsosi_usage_post_type_state( $rows, get_post_type_object( $type ), time() );
+		$line  = tsosi_usage_post_type_line( $type, $state );
+		if ( $state['live'] > 0 ) {
+			if ( $state['dormant'] ) {
+				$dormant[] = $line;
+			} else {
+				$published[] = $line;
 			}
-		}
-		if ( $live > 0 ) {
-			$published[] = $type . ' (' . $live . ')';
-		} elseif ( $total > 0 ) {
-			$other[] = $type . ' (' . $total . ')';
+		} elseif ( $state['total'] > 0 ) {
+			$other[] = $line;
 		}
 	}
 	if ( ! empty( $published ) ) {
@@ -1449,6 +1686,19 @@ function tsosi_usage_collect_content_types( $plugin_file, $facts, $owner_key = '
 			),
 			$published,
 			tsosi_ui_triple_text( 'its custom post types have live entries', 'sus tipos de contenido tienen entradas activas', 'els seus tipus de contingut tenen entrades actives' )
+		);
+	}
+	if ( ! empty( $dormant ) ) {
+		$signals[] = tsosi_usage_signal(
+			'post_types_dormant',
+			'review',
+			tsosi_ui_triple_text(
+				'Non-public custom post types whose entries have not been edited for a long time (probably leftover data; check before deleting)',
+				'Tipos de contenido no públicos cuyas entradas no se editan desde hace mucho (probablemente datos sobrantes; comprueba antes de borrar)',
+				'Tipus de contingut no públics amb entrades que fa molt que no s\'editen (probablement dades sobrants; comprova abans d\'esborrar)'
+			),
+			$dormant,
+			tsosi_ui_triple_text( 'its custom post types hold old entries', 'sus tipos de contenido guardan entradas antiguas', 'els seus tipus de contingut guarden entrades antigues' )
 		);
 	}
 	if ( ! empty( $other ) ) {
@@ -1493,6 +1743,37 @@ function tsosi_usage_collect_content_types( $plugin_file, $facts, $owner_key = '
 	}
 
 	return $signals;
+}
+
+/**
+ * Widgets of the plugin parked in an inactive area. They are not shown on the site, so
+ * this is only information: the leftovers can be removed before uninstalling.
+ *
+ * @param string[] $prefixes Option / widget id_base prefixes.
+ * @return array<int,array<string,mixed>>
+ */
+function tsosi_usage_collect_inactive_widgets( $prefixes ) {
+	$prefixes = array_values( array_filter( array_map( 'sanitize_key', (array) $prefixes ) ) );
+	if ( empty( $prefixes ) ) {
+		return array();
+	}
+	$instances = tsosi_scan_inactive_widget_instances( $prefixes );
+	if ( empty( $instances ) ) {
+		return array();
+	}
+	return array(
+		tsosi_usage_signal(
+			'widgets_inactive',
+			'info',
+			tsosi_ui_triple_text(
+				'Widgets of this plugin in the inactive area (not shown on the site; remove them from Appearance → Widgets)',
+				'Widgets de este plugin en la zona inactiva (no se muestran en el sitio; quítalos desde Apariencia → Widgets)',
+				'Widgets d\'aquest plugin a la zona inactiva (no es mostren al lloc; treu-los des d\'Aparença → Ginys)'
+			),
+			$instances,
+			tsosi_ui_triple_text( 'it has widgets in the inactive area', 'tiene widgets en la zona inactiva', 'té widgets a la zona inactiva' )
+		),
+	);
 }
 
 /**
@@ -2211,21 +2492,16 @@ function tsosi_usage_collect( $plugin_file, $args = array() ) {
 	$front   = tsosi_usage_collect_frontend( $plugin_file, $prefixes );
 	$signals = array_merge( $signals, $front );
 	// Hooking into page output only suggests visible output. When the public pages were
-	// read and show nothing of this plugin, that suspicion is refuted: keep it as information.
-	$front_ids = wp_list_pluck( $front, 'id' );
-	if ( ! empty( tsosi_usage_frontend_snapshot()['html'] ) && ! in_array( 'frontend_rendered', $front_ids, true ) && ! in_array( 'frontend_unavailable', $front_ids, true ) && tsosi_is_plugin_active_file( $plugin_file ) ) {
-		foreach ( $signals as $key => $signal ) {
-			if ( isset( $signal['id'] ) && 'frontend_hooks' === $signal['id'] && 'review' === $signal['severity'] ) {
-				$signals[ $key ]['severity'] = 'info';
-				$signals[ $key ]['summary']  = $signals[ $key ]['label'];
-			}
-		}
+	// read in full and show nothing of this plugin, that suspicion is refuted: keep it as information.
+	if ( tsosi_is_plugin_active_file( $plugin_file ) ) {
+		$signals = tsosi_usage_relax_frontend_hooks( $signals, tsosi_usage_frontend_snapshot() );
 	}
 	$signals = array_merge( $signals, tsosi_usage_collect_dependents( $plugin_file ) );
 	$signals = array_merge( $signals, tsosi_usage_collect_content_types( $plugin_file, $facts ) );
 	$signals = array_merge( $signals, tsosi_usage_collect_tables( $plugin_file, $facts, $prefixes ) );
 	$signals = array_merge( $signals, tsosi_usage_collect_roles( $facts ) );
 	$signals = array_merge( $signals, tsosi_usage_collect_builder_widgets( $facts ) );
+	$signals = array_merge( $signals, tsosi_usage_collect_inactive_widgets( $prefixes ) );
 	$signals = array_merge( $signals, tsosi_usage_collect_cron_leftovers( $plugin_file, $facts, $prefixes ) );
 	$signals = array_merge( $signals, tsosi_usage_collect_scheduled_actions( $prefixes ) );
 	$signals = array_merge( $signals, tsosi_usage_collect_page_templates( $plugin_file ) );
@@ -2256,7 +2532,7 @@ function tsosi_usage_collect( $plugin_file, $args = array() ) {
 	$out['checked'] = array(
 		tsosi_ui_triple_text( 'activation state (site, network, other sites, loaded by code)', 'estado de activación (sitio, red, otros sitios, cargado por código)', 'estat d\'activació (lloc, xarxa, altres llocs, carregat per codi)' ),
 		tsosi_ui_triple_text( 'hooks, cron, REST routes and widgets in memory', 'hooks, cron, rutas REST y widgets en memoria', 'hooks, cron, rutes REST i widgets en memòria' ),
-		tsosi_ui_triple_text( 'files and markup of the plugin in the HTML of the home page and latest posts', 'archivos y marcado del plugin en el HTML de la portada y las últimas entradas', 'fitxers i marcat del plugin a l\'HTML de la portada i les últimes entrades' ),
+		tsosi_ui_triple_text( 'files and markup of the plugin in the HTML of a sample of public pages (home, latest posts, shop pages, one entry and archive per content type, one page per template)', 'archivos y marcado del plugin en el HTML de una muestra de páginas públicas (portada, últimas entradas, páginas de tienda, una entrada y archivo por tipo de contenido, una página por plantilla)', 'fitxers i marcat del plugin a l\'HTML d\'una mostra de pàgines públiques (portada, últimes entrades, pàgines de botiga, una entrada i arxiu per tipus de contingut, una pàgina per plantilla)' ),
 		tsosi_ui_triple_text( 'dependencies declared by other plugins', 'dependencias declaradas por otros plugins', 'dependències declarades per altres plugins' ),
 		tsosi_ui_triple_text( 'custom post types, taxonomies and roles with data', 'tipos de contenido, taxonomías y roles con datos', 'tipus de contingut, taxonomies i rols amb dades' ),
 		tsosi_ui_triple_text( 'own database tables and pending scheduled actions', 'tablas propias y acciones programadas pendientes', 'taules pròpies i accions programades pendents' ),
