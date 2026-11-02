@@ -2,7 +2,7 @@
 /**
  * Plugin Name: TSO Stack Inspector
  * Description: Find where plugin shortcodes, blocks, and metadata are used before you deactivate or uninstall.
- * Version:     1.0.0
+ * Version:     1.0.4
  * Author:      Tu Soporte Online
  * Author URI:  https://www.tusoporteonline.es/blog
  * Requires at least: 6.1
@@ -23,7 +23,7 @@ if ( ! defined( 'TSOSI_FILE' ) ) {
 }
 
 if ( ! defined( 'TSOSI_VERSION' ) ) {
-	define( 'TSOSI_VERSION', '1.0.0' );
+	define( 'TSOSI_VERSION', '1.0.4' );
 }
 
 if ( ! defined( 'TSOSI_PATH' ) ) {
@@ -46,6 +46,14 @@ if ( ! defined( 'TSOSI_SCAN_BATCH_SIZE' ) ) {
 	define( 'TSOSI_SCAN_BATCH_SIZE', 25 );
 }
 
+if ( ! defined( 'TSOSI_SCAN_BATCH_MAX' ) ) {
+	define( 'TSOSI_SCAN_BATCH_MAX', 200 );
+}
+
+if ( ! defined( 'TSOSI_SCAN_STEP_TIME_BUDGET' ) ) {
+	define( 'TSOSI_SCAN_STEP_TIME_BUDGET', 2.5 );
+}
+
 require_once TSOSI_PATH . 'includes/tsosi-storage.php';
 require_once TSOSI_PATH . 'includes/tsosi-i18n.php';
 require_once TSOSI_PATH . 'includes/tsosi-support.php';
@@ -54,6 +62,7 @@ require_once TSOSI_PATH . 'includes/tsosi-scanner.php';
 require_once TSOSI_PATH . 'includes/tsosi-scan-extended.php';
 require_once TSOSI_PATH . 'includes/tsosi-scan-cache.php';
 require_once TSOSI_PATH . 'includes/tsosi-scan-history.php';
+require_once TSOSI_PATH . 'includes/tsosi-plugin-usage.php';
 require_once TSOSI_PATH . 'includes/tsosi-scan-risk.php';
 require_once TSOSI_PATH . 'includes/tsosi-replace.php';
 require_once TSOSI_PATH . 'includes/tsosi-orphans.php';

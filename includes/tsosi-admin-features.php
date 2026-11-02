@@ -27,7 +27,7 @@ function tsosi_admin_handle_settings_save() {
 	if ( ! is_admin() || ! current_user_can( 'manage_options' ) ) {
 		return;
 	}
-	if ( ! isset( $_POST['tsosi_save_settings'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Presence gate only; check_admin_referer runs before any settings write.
+	if ( ! tsosi_admin_post_is_set( 'tsosi_save_settings' ) ) {
 		return;
 	}
 	$page = tsosi_get_admin_query_arg( 'page' );
@@ -83,6 +83,8 @@ function tsosi_admin_signatures_help_text() {
 }
 
 /**
+ * Admin echo help.
+ *
  * @param string $text Help paragraph (already translated).
  * @return void
  */
@@ -93,9 +95,11 @@ function tsosi_admin_echo_help( $text ) {
 /**
  * Cache status bar above tabs.
  *
+ * @param array|null $cleaner_cta Optional Options Cleaner call-to-action (url, label).
+ *
  * @return void
  */
-function tsosi_admin_render_cache_bar() {
+function tsosi_admin_render_cache_bar( $cleaner_cta = null ) {
 	$status = tsosi_scan_get_cache_status();
 	$ready  = ! empty( $status['ready'] );
 	echo '<div class="tsosi-cache-bar" id="tsosi-cache-bar" data-ready="' . ( $ready ? '1' : '0' ) . '">';
@@ -134,7 +138,7 @@ function tsosi_admin_render_cache_bar() {
 	echo '<button type="button" class="button button-small" id="tsosi-rebuild-cache">';
 	echo esc_html( tsosi_ui_triple_text( 'Rebuild index', 'Reconstruir índice', 'Reconstruir índex' ) );
 	echo '</button>';
-	echo '</div>';
+	echo '<details class="tsosi-cache-details"><summary>?</summary>';
 	tsosi_admin_echo_help(
 		tsosi_ui_triple_text(
 			'The index is a local copy of posts, widgets, menus, and options. It is built in the background when you open this page (or when you scan), then reused until content changes. Rebuild forces a fresh read — useful after bulk imports or if results look outdated.',
@@ -142,10 +146,91 @@ function tsosi_admin_render_cache_bar() {
 			'L\'índex és una còpia local d\'entrades, widgets, menús i opcions. Es crea en segon pla en obrir aquesta pàgina (o en escanejar), i es reutilitza fins que canviï el contingut. Reconstruir obliga a llegir-lo de nou — útil després d\'importacions massives o si els resultats semblen antic.'
 		)
 	);
+	echo '</details>';
+	echo '</div>';
+	if ( null !== $cleaner_cta ) {
+		echo '<div class="tsosi-cache-bar-cleaner">';
+		echo '<a class="button button-small button-secondary" target="_blank" rel="noopener noreferrer" href="' . esc_url( $cleaner_cta['url'] ) . '">' . esc_html( $cleaner_cta['label'] ) . '</a>';
+		echo '</div>';
+	}
 	echo '</div>';
 }
 
 /**
+ * Render the body of one tab (shared by the full page and the AJAX tab loader).
+ *
+ * @param string                             $tab       Tab slug.
+ * @param array<string,array<string,string>> $plugins   Installed plugins.
+ * @param array<string,array<string,mixed>>  $profiles  Cached plugin profiles.
+ * @param string                             $preselect Optional plugin file to preselect.
+ * @return void
+ */
+function tsosi_admin_render_tab_body( $tab, $plugins, $profiles, $preselect = '' ) {
+	if ( 'plugin' === $tab ) {
+		tsosi_admin_render_plugin_tab( $plugins, $profiles, $preselect );
+	} elseif ( 'shortcode' === $tab ) {
+		tsosi_admin_render_shortcode_tab();
+	} elseif ( 'block' === $tab ) {
+		tsosi_admin_render_block_tab();
+	} elseif ( 'replace' === $tab ) {
+		tsosi_admin_render_replace_tab();
+	} elseif ( 'orphans' === $tab ) {
+		tsosi_admin_render_orphans_tab();
+	} elseif ( 'theme' === $tab ) {
+		tsosi_admin_render_theme_tab();
+	} elseif ( 'compare' === $tab ) {
+		tsosi_admin_render_compare_tab( $plugins );
+	} elseif ( 'inactive' === $tab ) {
+		tsosi_admin_render_inactive_tab( $plugins );
+	} elseif ( 'history' === $tab ) {
+		tsosi_admin_render_history_tab();
+	} elseif ( 'settings' === $tab ) {
+		tsosi_admin_render_settings_tab();
+	} else {
+		tsosi_admin_render_inventory_tab( $profiles );
+	}
+}
+
+/**
+ * AJAX: return one tab's HTML so the tabs switch without a full wp-admin reload.
+ * Falls back (error) when the signature cache is cold; the browser then navigates normally.
+ *
+ * @return void
+ */
+function tsosi_ajax_load_tab() {
+	tsosi_ajax_require_manage_options();
+
+	$tab = sanitize_key( tsosi_get_ajax_post_text( 'tab' ) );
+	if ( ! in_array( $tab, tsosi_admin_tab_slugs(), true ) ) {
+		wp_send_json_error( array( 'message' => __( 'Unknown tab.', 'tso-stack-inspector' ) ) );
+	}
+
+	$profiles = tsosi_get_cached_plugin_profiles();
+	if ( null === $profiles ) {
+		wp_send_json_error(
+			array(
+				'code'    => 'cold',
+				'message' => __( 'Plugin signatures are not ready.', 'tso-stack-inspector' ),
+			)
+		);
+	}
+
+	ob_start();
+	tsosi_admin_render_tab_body( $tab, tsosi_get_installed_plugins(), $profiles, '' );
+	$html = (string) ob_get_clean();
+
+	wp_send_json_success(
+		array(
+			'tab'  => $tab,
+			'html' => $html,
+		)
+	);
+}
+add_action( 'wp_ajax_tsosi_load_tab', 'tsosi_ajax_load_tab' );
+
+/**
+ * Admin render settings tab.
+ *
  * @return void
  */
 function tsosi_admin_render_settings_tab() {
@@ -283,6 +368,8 @@ function tsosi_admin_render_settings_tab() {
 }
 
 /**
+ * Admin render theme tab.
+ *
  * @return void
  */
 function tsosi_admin_render_theme_tab() {
@@ -372,6 +459,8 @@ function tsosi_admin_render_theme_tab() {
 }
 
 /**
+ * Admin render compare tab.
+ *
  * @param array<string,array<string,string>> $plugins Plugins list.
  * @return void
  */
@@ -581,6 +670,8 @@ function tsosi_admin_history_entry_option_label( $entry ) {
 }
 
 /**
+ * Admin render history tab.
+ *
  * @return void
  */
 function tsosi_admin_render_history_tab() {
@@ -780,7 +871,10 @@ add_action( 'wp_ajax_tsosi_index_step', 'tsosi_ajax_index_step' );
 function tsosi_ajax_theme_profile() {
 	tsosi_ajax_require_manage_options();
 
-	$stylesheet = tsosi_sanitize_theme_stylesheet( tsosi_get_ajax_post_text( 'theme' ) );
+	$theme_raw  = tsosi_get_ajax_post_text( 'theme' );
+	$stylesheet = tsosi_sanitize_theme_stylesheet(
+		'' !== $theme_raw ? $theme_raw : wp_get_theme()->get_stylesheet()
+	);
 	if ( '' === $stylesheet ) {
 		wp_send_json_error( array( 'message' => __( 'Select a valid theme.', 'tso-stack-inspector' ) ) );
 	}

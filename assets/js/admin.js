@@ -63,6 +63,8 @@
 	var lastInactiveRows = [];
 	var indexAbort = false;
 	var indexBusy = false;
+	var profilesWarming = null; // Promise while the plugin-signature cache is being built.
+	var opPending = false; // A scan/audit is waiting for that cache.
 
 	function ignoreTokens() {
 		return Array.isArray(cfg.ignoreTokens) ? cfg.ignoreTokens : [];
@@ -95,14 +97,15 @@
 
 	// A row counts as "content" (currently visible/active use) when it's a shortcode or
 	// block still in post content, OR an active widget instance placed in a live sidebar
-	// (source_type 'widget' -- see tsosi_scan_active_widget_instances() /
-	// tsosi_scan_risk_row_is_active_widget() in tsosi-scan-risk.php). Keep this in sync
-	// with assessRiskClient() and the server-side risk assessment: the "Show content
-	// matches only" button on a "danger" banner must actually surface the row that
-	// caused that banner, not hide it.
+	// (row.active_widget, set only by tsosi_scan_active_widget_instances() /
+	// tsosi_scan_risk_row_is_active_widget() in tsosi-scan-risk.php). A leftover
+	// widget_* option uses source_type "widget" too, but it is stored data, not a
+	// widget on the front. Keep this in sync with assessRiskClient() and the
+	// server-side risk assessment: the "Show content matches only" button on a
+	// "danger" banner must actually surface the row that caused that banner.
 	function isContentBucketRow(row) {
 		var matchType = String(row.match_type || row.source_type || '');
-		return matchType === 'shortcode' || matchType === 'block' || String(row.source_type || '') === 'widget';
+		return matchType === 'shortcode' || matchType === 'block' || !!row.active_widget;
 	}
 
 	function getFilteredResults() {
@@ -299,34 +302,54 @@
 		return parts.length ? parts.join(' | ') : '—';
 	}
 
-	function csvEscape(value) {
+	/**
+	 * CSV field separator. Excel opens a comma-separated file as a single column when the
+	 * system list separator is a semicolon (Spanish/Catalan Windows), so es/ca use ";".
+	 */
+	function csvDelimiter() {
+		return cfg.lang === 'en' ? ',' : ';';
+	}
+
+	function csvEscape(value, delim) {
 		var str = String(value == null ? '' : value);
-		// Guard against CSV/formula injection: a cell starting with =, +, -, or @ can be
-		// read as a formula by Excel/Sheets. Content here can include post titles or other
+		delim = delim || ',';
+		// Guard against CSV/formula injection: a cell starting with =, +, -, @, tab or CR can
+		// be read as a formula by Excel/Sheets. Content here can include post titles or other
 		// text from any author able to publish content, so treat it as untrusted on export.
-		if (/^[=+\-@]/.test(str)) {
+		// Plain numbers (counts) are left alone.
+		if (/^[=+\-@\t\r]/.test(str) && !/^-?\d+(\.\d+)?$/.test(str)) {
 			str = "'" + str;
 		}
-		if (/[",\n\r]/.test(str)) {
+		if (str.indexOf(delim) >= 0 || /["\n\r]/.test(str)) {
 			return '"' + str.replace(/"/g, '""') + '"';
 		}
 		return str;
 	}
 
 	function downloadCsv(filename, headers, rows) {
-		var lines = [headers.map(csvEscape).join(',')];
+		var delim = csvDelimiter();
+		var esc = function (cell) {
+			return csvEscape(cell, delim);
+		};
+		var lines = [headers.map(esc).join(delim)];
 		(rows || []).forEach(function (row) {
-			lines.push(row.map(csvEscape).join(','));
+			lines.push(row.map(esc).join(delim));
 		});
-		var blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+		// UTF-8 BOM so Excel reads accents correctly; CRLF line endings per RFC 4180.
+		var blob = new Blob(['\ufeff' + lines.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8;' });
 		var url = URL.createObjectURL(blob);
 		var link = document.createElement('a');
 		link.href = url;
 		link.download = filename;
+		link.style.display = 'none';
+		document.body.appendChild(link);
 		link.click();
-		URL.revokeObjectURL(url);
+		document.body.removeChild(link);
+		// Revoking at once cancels the download in Firefox/Safari.
+		window.setTimeout(function () {
+			URL.revokeObjectURL(url);
+		}, 1000);
 	}
-
 	function exportCsv() {
 		var headers = cfg.csvHeaders || ['Location', 'Type', 'Match', 'Context', 'Edit URL'];
 		// Export what's currently on screen (active search/type/bucket filters and the
@@ -453,14 +476,17 @@
 
 		var cleanerUrl = meta.cleaner_url || '';
 		var cleanerAvailable = meta.cleaner_available;
-		if (cleanerAvailable && cleanerUrl && (risk.level === 'safe' || risk.level === 'review')) {
+		if (meta.plugin_active && (risk.level === 'safe' || risk.level === 'review')) {
+			// Leftovers of a plugin that is still active are not leftovers: cleaning them would break it.
+			mainHtml += '<p class="tsosi-risk-help">' + escapeHtml(i18n.cleanerAfter || '') + '</p>';
+		} else if (cleanerAvailable && cleanerUrl && (risk.level === 'safe' || risk.level === 'review')) {
 			mainHtml += '<p class="tsosi-risk-cta"><a class="button button-primary" href="' + escapeAttr(cleanerUrl) + '">' +
 				escapeHtml(i18n.cleanerCta || 'Clean leftovers in Options Cleaner') + '</a></p>';
 		} else if (!cleanerAvailable && (risk.level === 'safe' || risk.level === 'review')) {
 			mainHtml += '<p class="tsosi-risk-help">' + escapeHtml(i18n.cleanerMissing || '') + '</p>';
 		}
 
-		if (risk.level === 'danger') {
+		if (risk.level === 'danger' && Number(risk.content || 0) > 0) {
 			mainHtml += '<p class="tsosi-risk-cta"><button type="button" class="button" id="tsosi-risk-filter-content">' +
 				escapeHtml(i18n.filterContentOnly || 'Show content matches only') + '</button></p>';
 		} else if (risk.level === 'review') {
@@ -476,9 +502,10 @@
 			html += '<li>' + escapeHtml(i18n.checklist2 || '') + '</li>';
 			html += '<li>' + escapeHtml(i18n.checklist3 || '') + '</li>';
 			html += '<li>' + escapeHtml(i18n.checklist4 || '') + '</li>';
-			html += '<li>' + escapeHtml(i18n.checklist5 || '') + '</li>';
 			html += '</ol></div>';
 		}
+
+		html += renderUsagePanel(meta.usage || null);
 
 		el.innerHTML = html;
 
@@ -504,6 +531,46 @@
 		}
 
 		updateCleanerLink(cleanerUrl, !!cleanerAvailable);
+	}
+
+	// "Other signs that the plugin is in use": activation state, hooks, post types, tables,
+	// dependencies, code references... (server-built in tsosi-plugin-usage.php, already
+	// translated). Always shown for plugin scans so a green verdict also lists what was checked.
+	function renderUsagePanel(usage) {
+		if (!usage || !usage.signals) {
+			return '';
+		}
+		// Only the reasons that matter: informational signals (hooks, AJAX, cron...) are not shown.
+		var shown = usage.signals.filter(function (sig) {
+			return sig.severity === 'danger' || sig.severity === 'review';
+		});
+		if (!shown.length) {
+			return '';
+		}
+		var html = '<div class="tsosi-usage">';
+		html += '<ul class="tsosi-usage-list">';
+		(function () {
+			shown.forEach(function (sig) {
+				var sev = String(sig.severity || 'info');
+				html += '<li class="tsosi-usage-item tsosi-usage-' + escapeAttr(sev) + '">' +
+					'<span class="tsosi-usage-dot" aria-hidden="true"></span>' +
+					'<span class="tsosi-usage-label">' + escapeHtml(sig.label || '') + '</span>';
+				if (sig.items && sig.items.length) {
+					html += '<details class="tsosi-usage-more"><summary>' + escapeHtml((i18n.usageDetails || 'Details') + ' (' + String(sig.items.length + (sig.more || 0)) + ')') + '</summary><ul>';
+					sig.items.forEach(function (item) {
+						html += '<li><code>' + escapeHtml(item) + '</code></li>';
+					});
+					if (sig.more) {
+						html += '<li>… +' + escapeHtml(String(sig.more)) + '</li>';
+					}
+					html += '</ul></details>';
+				}
+				html += '</li>';
+			});
+		}());
+		html += '</ul>';
+		html += '</div>';
+		return html;
 	}
 
 	function updateCleanerLink(url, available) {
@@ -575,6 +642,10 @@
 
 	function runSteps() {
 		return post('tsosi_scan_step', {}).then(function (payload) {
+			if (!scanActive) {
+				// Cancelled while this step was in flight: do not overwrite the "cancelled" state.
+				return;
+			}
 			if (!payload || !payload.success) {
 				throw new Error((payload && payload.data && payload.data.message) || i18n.scanError);
 			}
@@ -595,7 +666,33 @@
 		});
 	}
 
+	/**
+	 * Run an operation that needs the plugin signatures (scans compare against every other
+	 * plugin's prefixes; the audit reads all profiles) once the background warm-up is done,
+	 * so the server never has to build them all inside that one request.
+	 */
+	function afterProfiles(run) {
+		if (!profilesWarming) {
+			return run();
+		}
+		opPending = true;
+		return profilesWarming.then(function () {
+			opPending = false;
+			return run();
+		});
+	}
+
 	function startScan(mode) {
+		if (profilesWarming) {
+			showPanel();
+			setProgress(i18n.scanning || 'Scanning…');
+		}
+		return afterProfiles(function () {
+			return runScan(mode);
+		});
+	}
+
+	function runScan(mode) {
 		indexAbort = true;
 		showPanel();
 		showScanActions(false);
@@ -646,6 +743,11 @@
 			scanActive = false;
 			showScanToolbar(false);
 			setProgress((payload && payload.data && payload.data.message) || i18n.scanCancelled || 'Cancelled.');
+		}).catch(function (err) {
+			stopPoll();
+			scanActive = false;
+			showScanToolbar(false);
+			setProgress((err && err.message) || i18n.scanError || 'Error');
 		});
 	}
 
@@ -771,6 +873,9 @@
 	}
 
 	function runCompare() {
+		if (!compareReady()) {
+			return;
+		}
 		var a = (qs('#tsosi-compare-a') || {}).value || '';
 		var b = (qs('#tsosi-compare-b') || {}).value || '';
 		var box = qs('#tsosi-compare-results');
@@ -810,8 +915,12 @@
 	}
 
 	function loadHistory(id) {
+		if (!id) {
+			return;
+		}
 		post('tsosi_load_history', { history_id: id }).then(function (payload) {
 			if (!payload || !payload.success) {
+				window.alert((payload && payload.data && payload.data.message) || (i18n.scanError || 'Error'));
 				return;
 			}
 			showPanel();
@@ -824,6 +933,13 @@
 				needles_empty: data.meta && data.meta.needles_empty,
 				cached: data.meta && data.meta.cached,
 			});
+			// The results panel sits below the history table: bring it into view.
+			var panel = qs('#tsosi-scan-panel');
+			if (panel && panel.scrollIntoView) {
+				panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+			}
+		}).catch(function () {
+			window.alert(i18n.scanError || 'Error');
 		});
 	}
 
@@ -843,6 +959,8 @@
 			if (tbody && !tbody.querySelector('tr')) {
 				window.location.reload();
 			}
+		}).catch(function () {
+			window.alert(i18n.scanError || 'Error');
 		});
 	}
 
@@ -862,6 +980,9 @@
 	var lastReplaceIds = [];
 
 	function replacePreview() {
+		if (!replaceReady()) {
+			return;
+		}
 		var kind = (qs('#tsosi-replace-kind') || {}).value || 'shortcode';
 		var from = (qs('#tsosi-replace-from') || {}).value || '';
 		var to = (qs('#tsosi-replace-to') || {}).value || '';
@@ -912,6 +1033,10 @@
 			box.hidden = false;
 			if (applyBtn) {
 				applyBtn.disabled = lastReplaceIds.length === 0;
+			}
+		}).catch(function (err) {
+			if (status) {
+				status.textContent = (err && err.message) || i18n.scanError || 'Error';
 			}
 		});
 	}
@@ -989,6 +1114,15 @@
 						.replace('%3$s', String(d.errors || 0));
 				}
 				runBatch(rest);
+			}).catch(function (err) {
+				// Network/parse error mid-way: unblock the UI and tell how many posts were already updated.
+				if (status) {
+					status.textContent = ((err && err.message) || i18n.scanError || 'Error') + ' ' +
+						(i18n.replaceUpdatedTotal || 'Updated %d.').replace('%d', String(totalUpdated));
+				}
+				if (applyBtn) {
+					applyBtn.disabled = false;
+				}
 			});
 		}
 
@@ -1010,6 +1144,8 @@
 			var d = payload.data || {};
 			window.alert((i18n.replaceUndoDone || 'Restored %d post(s).').replace('%d', String(d.restored || 0)));
 			window.location.reload();
+		}).catch(function (err) {
+			window.alert((err && err.message) || i18n.scanError || 'Error');
 		});
 	}
 
@@ -1250,7 +1386,9 @@
 				'</tr></thead><tbody>';
 			rows.forEach(function (row) {
 				html += '<tr>' +
-					'<td>' + escapeHtml(row.name || row.plugin_file || '') + '</td>' +
+					'<td>' + escapeHtml(row.name || row.plugin_file || '') +
+					(row.reasons && row.reasons.length ? '<div class="description tsosi-audit-reasons">' + escapeHtml(row.reasons.slice(0, 4).join(' · ')) + '</div>' : '') +
+					'</td>' +
 					'<td>' + escapeHtml(String(row.match_count || 0)) +
 					(row.content || row.data ? ' <span class="description">(' + escapeHtml(String(row.content || 0)) + ' content / ' + escapeHtml(String(row.data || 0)) + ' data)</span>' : '') +
 					'</td>' +
@@ -1271,7 +1409,9 @@
 			return post('tsosi_audit_inactive', {});
 		}
 
-		ensureIndex().then(function () {
+		afterProfiles(function () {
+			return ensureIndex();
+		}).then(function () {
 			return auditOnce();
 		}).then(function (payload) {
 			if (payloadNeedsIndex(payload)) {
@@ -1384,13 +1524,80 @@
 		window.prompt('', text);
 	}
 
-	function bind() {
+	function warmProfilesStep(onProgress) {
+		return post('tsosi_profiles_warm', {}).then(function (payload) {
+			if (!payload || !payload.success) {
+				throw new Error((payload && payload.data && payload.data.message) || i18n.profilesFail);
+			}
+			var data = payload.data || {};
+			onProgress(data.progress || 0);
+			if (data.done) {
+				return true;
+			}
+			return warmProfilesStep(onProgress);
+		});
+	}
+
+	/**
+	 * The plugin-signature cache is built here, in small AJAX steps, instead of while the
+	 * page renders (which left the whole screen blank on a cold cache).
+	 */
+	function warmProfiles() {
+		var notice = qs('#tsosi-profiles-notice');
+		if (!notice) {
+			return;
+		}
+		var textEl = qs('#tsosi-profiles-notice-text');
+		function setText(text) {
+			if (textEl) {
+				textEl.textContent = text;
+			}
+		}
+		function typedByUser() {
+			var ids = ['#tsosi-shortcode', '#tsosi-block'];
+			return ids.some(function (sel) {
+				var el = qs(sel);
+				return !!(el && el.value);
+			});
+		}
+		profilesWarming = warmProfilesStep(function (pct) {
+			setText((i18n.profilesBuilding || 'Preparing plugin signatures… %s%').replace('%s', String(pct)));
+		}).then(function () {
+			profilesWarming = null;
+			if (notice.getAttribute('data-reload') !== '1') {
+				notice.style.display = 'none';
+				return;
+			}
+			if (scanActive || opPending || typedByUser()) {
+				// Do not throw away a running scan or what the user has typed.
+				setText(i18n.profilesReady || 'Plugin signatures are ready. Reload the page to see them.');
+				return;
+			}
+			var url = new URL(window.location.href);
+			var pluginSelect = qs('#tsosi-plugin-file');
+			if (pluginSelect && pluginSelect.value) {
+				url.searchParams.set('plugin_file', pluginSelect.value);
+			}
+			window.location.href = url.toString();
+		}).catch(function (err) {
+			profilesWarming = null;
+			setText((err && err.message) || i18n.profilesFail || 'Could not prepare plugin signatures.');
+		});
+	}
+
+	function bind(tabOnly) {
 		qsa('.tsosi-start-scan').forEach(function (btn) {
 			btn.addEventListener('click', function () {
-				startScan(btn.getAttribute('data-mode') || 'plugin');
+				var mode = btn.getAttribute('data-mode') || 'plugin';
+				if (!scanModeReady(mode)) {
+					syncActionButtons();
+					return;
+				}
+				startScan(mode);
 			});
 		});
 
+		if (!tabOnly) {
 		var langSelect = qs('#tsosi-set-lang');
 		if (langSelect && langSelect.form) {
 			langSelect.addEventListener('change', function () {
@@ -1408,6 +1615,7 @@
 		var groupBox = qs('#tsosi-group-results');
 		if (groupBox) {
 			groupBox.addEventListener('change', applyFilters);
+		}
 		}
 
 		var replacePreviewBtn = qs('#tsosi-replace-preview');
@@ -1439,6 +1647,7 @@
 			diffBtn.addEventListener('click', runHistoryDiff);
 		}
 
+		if (!tabOnly) {
 		var cancelBtn = qs('#tsosi-cancel-scan');
 		if (cancelBtn) {
 			cancelBtn.addEventListener('click', cancelScan);
@@ -1447,6 +1656,7 @@
 		var rebuildBtn = qs('#tsosi-rebuild-cache');
 		if (rebuildBtn) {
 			rebuildBtn.addEventListener('click', rebuildCache);
+		}
 		}
 
 		var compareBtn = qs('#tsosi-run-compare');
@@ -1485,6 +1695,7 @@
 			btn.addEventListener('click', refreshProfiles);
 		});
 
+		if (!tabOnly) {
 		var csvBtn = qs('#tsosi-export-csv');
 		if (csvBtn) {
 			csvBtn.addEventListener('click', exportCsv);
@@ -1492,6 +1703,7 @@
 		var pdfBtn = qs('#tsosi-export-pdf');
 		if (pdfBtn) {
 			pdfBtn.addEventListener('click', exportPdf);
+		}
 		}
 
 		['#tsosi-block-select', '#tsosi-block', '#tsosi-shortcode-select', '#tsosi-shortcode'].forEach(function () {
@@ -1522,13 +1734,21 @@
 			themeSelect.addEventListener('change', loadThemeProfile);
 		}
 
-		document.addEventListener('click', function (event) {
+		if (!tabOnly) document.addEventListener('click', function (event) {
 			var copyBtn = event.target && event.target.closest ? event.target.closest('.tsosi-copy-tag') : null;
 			if (copyBtn) {
 				event.preventDefault();
 				copyTagFromButton(copyBtn);
 			}
 		});
+
+		initActionGuards();
+		if (tabOnly) {
+			return;
+		}
+		initThemeToggle();
+		warmProfiles();
+		initTabNav();
 
 		if (!cfg.indexReady && cfg.indexStorageReady) {
 			ensureIndex().catch(function () {
@@ -1537,8 +1757,224 @@
 		}
 	}
 
+	/**
+	 * Switch tabs through AJAX (no full wp-admin reload) and prefetch on hover.
+	 * Any failure falls back to a normal navigation.
+	 */
+	function initTabNav() {
+		var nav = qs('.tsosi-tabs');
+		var body = qs('#tsosi-tab-body');
+		if (!nav || !body || !window.history || !window.history.pushState || !window.URL) {
+			return;
+		}
+		var pending = {};
+
+		function tabOfLink(a) {
+			return a.getAttribute('data-tab') || '';
+		}
+
+		function tabFromUrl() {
+			return new URL(window.location.href).searchParams.get('tab') || 'plugin';
+		}
+
+		function fetchTab(tab) {
+			return post('tsosi_load_tab', { tab: tab }).then(function (payload) {
+				if (!payload || !payload.success || !payload.data || typeof payload.data.html !== 'string') {
+					throw new Error('tab');
+				}
+				return payload.data.html;
+			});
+		}
+
+		function prefetch(tab) {
+			if (!pending[tab]) {
+				pending[tab] = fetchTab(tab);
+				pending[tab].catch(function () {
+					delete pending[tab];
+				});
+				window.setTimeout(function () {
+					delete pending[tab];
+				}, 20000);
+			}
+			return pending[tab];
+		}
+
+		function show(tab, html, url, push) {
+			body.innerHTML = html;
+			qsa('.nav-tab', nav).forEach(function (a) {
+				a.classList.toggle('nav-tab-active', tabOfLink(a) === tab);
+			});
+			if (!scanActive) {
+				var panel = qs('#tsosi-scan-panel');
+				if (panel) {
+					panel.hidden = true;
+				}
+			}
+			if (push) {
+				window.history.pushState({ tsosiTab: tab }, '', url);
+			}
+			bind(true);
+		}
+
+		function go(tab, url, push, fallbackUrl) {
+			var req = prefetch(tab);
+			body.classList.add('tsosi-tab-loading');
+			req.then(function (html) {
+				delete pending[tab];
+				body.classList.remove('tsosi-tab-loading');
+				show(tab, html, url, push);
+			}).catch(function () {
+				delete pending[tab];
+				window.location.href = fallbackUrl || url;
+			});
+		}
+
+		window.history.replaceState({ tsosiTab: tabFromUrl() }, '', window.location.href);
+
+		qsa('.nav-tab', nav).forEach(function (a) {
+			var tab = tabOfLink(a);
+			if (!tab) {
+				return;
+			}
+			['mouseenter', 'focus', 'touchstart'].forEach(function (evt) {
+				a.addEventListener(evt, function () {
+					if (tab !== tabFromUrl()) {
+						prefetch(tab);
+					}
+				}, { passive: true });
+			});
+			a.addEventListener('click', function (event) {
+				if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) {
+					return;
+				}
+				event.preventDefault();
+				if (tab === tabFromUrl()) {
+					return;
+				}
+				go(tab, a.href, true, a.href);
+			});
+		});
+
+		window.addEventListener('popstate', function () {
+			go(tabFromUrl(), window.location.href, false, window.location.href);
+		});
+	}
+	/**
+	 * Day / night / auto appearance. The first paint is handled by the boot script in <head>
+	 * (window.tsosiThemeBoot); this only wires the toggle. Cycles auto -> day -> night.
+	 */
+	function initThemeToggle() {
+		var wrap = document.querySelector('.tsosi-wrap');
+		var btn = document.getElementById('tsosi-theme-toggle');
+		var boot = window.tsosiThemeBoot;
+		if (!wrap || !btn || !boot) {
+			return;
+		}
+		var i18n = cfg.themeI18n || {};
+
+		function apply(pref) {
+			var resolved = boot.resolve(pref);
+			wrap.setAttribute('data-theme', resolved);
+			wrap.setAttribute('data-theme-pref', pref);
+			document.documentElement.setAttribute('data-tsosi-theme', resolved);
+			document.documentElement.setAttribute('data-tsosi-theme-pref', pref);
+			var key = pref === 'auto' ? 'themeAuto' : pref === 'day' ? 'themeDay' : 'themeNight';
+			var title = i18n[key] || (pref === 'auto' ? 'Auto mode' : pref === 'day' ? 'Day mode' : 'Night mode');
+			if (pref === 'auto' && i18n.themeAutoHint) {
+				title += ' — ' + i18n.themeAutoHint;
+			}
+			btn.setAttribute('aria-pressed', pref === 'auto' ? 'mixed' : resolved === 'night' ? 'true' : 'false');
+			btn.setAttribute('title', title);
+		}
+
+		btn.addEventListener('click', function () {
+			var cur = boot.readPref();
+			var next = cur === 'auto' ? 'day' : cur === 'day' ? 'night' : 'auto';
+			try {
+				window.localStorage.setItem(boot.key, next);
+			} catch (e) {
+				/* Ignore storage errors. */
+			}
+			apply(next);
+		});
+
+		window.setInterval(function () {
+			if (boot.readPref() === 'auto' && wrap.getAttribute('data-theme') !== boot.solar()) {
+				apply('auto');
+			}
+		}, 60000);
+
+		apply(boot.readPref());
+	}
+
+	/**
+	 * Fill in the value each action needs and keep its button disabled until it is set.
+	 * Returns true when the control group is complete.
+	 */
+	function fieldValue(sel) {
+		var el = qs(sel);
+		return el && typeof el.value === 'string' ? el.value.trim() : '';
+	}
+
+	function scanModeReady(mode) {
+		if (mode === 'plugin') {
+			return fieldValue('#tsosi-plugin-file') !== '';
+		}
+		if (mode === 'shortcode') {
+			return fieldValue('#tsosi-shortcode') !== '' || fieldValue('#tsosi-shortcode-select') !== '';
+		}
+		if (mode === 'block') {
+			return fieldValue('#tsosi-block') !== '' || fieldValue('#tsosi-block-select') !== '';
+		}
+		if (mode === 'theme') {
+			return fieldValue('#tsosi-theme-stylesheet') !== '';
+		}
+		return true;
+	}
+
+	function compareReady() {
+		var a = fieldValue('#tsosi-compare-a');
+		var b = fieldValue('#tsosi-compare-b');
+		return a !== '' && b !== '' && a !== b;
+	}
+
+	function replaceReady() {
+		return fieldValue('#tsosi-replace-from') !== '';
+	}
+
+	function syncActionButtons() {
+		qsa('.tsosi-start-scan').forEach(function (btn) {
+			btn.disabled = !scanModeReady(btn.getAttribute('data-mode') || 'plugin');
+		});
+		var compareBtn = qs('#tsosi-run-compare');
+		if (compareBtn) {
+			compareBtn.disabled = !compareReady();
+		}
+		var replaceBtn = qs('#tsosi-replace-preview');
+		if (replaceBtn) {
+			replaceBtn.disabled = !replaceReady();
+		}
+	}
+
+	function initActionGuards() {
+		[
+			'#tsosi-plugin-file', '#tsosi-shortcode', '#tsosi-shortcode-select', '#tsosi-block',
+			'#tsosi-block-select', '#tsosi-theme-stylesheet', '#tsosi-compare-a', '#tsosi-compare-b',
+			'#tsosi-replace-from'
+		].forEach(function (sel) {
+			var el = qs(sel);
+			if (el) {
+				el.addEventListener('input', syncActionButtons);
+				el.addEventListener('change', syncActionButtons);
+			}
+		});
+		syncActionButtons();
+	}
+
 	if (document.readyState === 'loading') {
-		document.addEventListener('DOMContentLoaded', bind);
+		document.addEventListener('DOMContentLoaded', function () {
+			bind(false);
+		});
 	} else {
 		bind();
 	}

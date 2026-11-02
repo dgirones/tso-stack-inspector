@@ -110,7 +110,74 @@ function tsosi_orphans_registered_shortcode_map() {
 			}
 		}
 	}
+
+	// Some plugins only register their shortcodes on the front end (or late), so they are
+	// missing from $shortcode_tags in wp-admin/AJAX. Trust the static signatures of ACTIVE
+	// plugins too, otherwise those tags would be reported as orphans.
+	foreach ( tsosi_orphans_active_plugin_profiles() as $profile ) {
+		foreach ( (array) ( $profile['shortcodes'] ?? array() ) as $tag ) {
+			$clean = tsosi_sanitize_shortcode_tag( (string) $tag );
+			if ( '' !== $clean ) {
+				$map[ $clean ] = true;
+			}
+		}
+	}
+	// The active theme (and its parent) registers shortcodes/blocks too.
+	foreach ( tsosi_orphans_theme_signatures( 'shortcodes' ) as $tag ) {
+		$map[ $tag ] = true;
+	}
 	return $map;
+}
+
+/**
+ * Static shortcode/block names declared by the active theme and its parent.
+ *
+ * @param string $field shortcodes|blocks.
+ * @return string[]
+ */
+function tsosi_orphans_theme_signatures( $field ) {
+	static $memo = array();
+	if ( ! function_exists( 'tsosi_build_theme_profile' ) ) {
+		return array();
+	}
+	if ( ! isset( $memo['profiles'] ) ) {
+		$memo['profiles'] = array( tsosi_build_theme_profile( get_stylesheet() ) );
+		if ( get_template() !== get_stylesheet() ) {
+			$memo['profiles'][] = tsosi_build_theme_profile( get_template() );
+		}
+	}
+	$out = array();
+	foreach ( $memo['profiles'] as $profile ) {
+		foreach ( (array) ( $profile[ $field ] ?? array() ) as $name ) {
+			$out[] = (string) $name;
+		}
+	}
+	return array_values( array_unique( array_filter( $out ) ) );
+}
+
+/**
+ * Cached signature profiles of active plugins (never builds them).
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function tsosi_orphans_active_plugin_profiles() {
+	$profiles = function_exists( 'tsosi_get_cached_plugin_profiles' ) ? tsosi_get_cached_plugin_profiles() : null;
+	if ( ! is_array( $profiles ) && function_exists( 'tsosi_get_all_plugin_profiles' ) ) {
+		// Cold cache: without the static signatures every shortcode/block registered late
+		// (front end only, conditionally) would be reported as an orphan.
+		$profiles = tsosi_get_all_plugin_profiles();
+	}
+	if ( ! is_array( $profiles ) ) {
+		return array();
+	}
+	return array_values(
+		array_filter(
+			$profiles,
+			static function ( $profile ) {
+				return is_array( $profile ) && ! empty( $profile['active'] );
+			}
+		)
+	);
 }
 
 /**
@@ -130,6 +197,23 @@ function tsosi_orphans_registered_block_map() {
 	}
 	foreach ( array_keys( $blocks ) as $block_name ) {
 		$clean = tsosi_sanitize_block_name( (string) $block_name );
+		if ( '' !== $clean ) {
+			$map[ $clean ] = true;
+		}
+	}
+
+	// Blocks registered only in JavaScript / conditionally are missing from the PHP
+	// registry: also trust the static signatures of active plugins.
+	foreach ( tsosi_orphans_active_plugin_profiles() as $profile ) {
+		foreach ( (array) ( $profile['blocks'] ?? array() ) as $block_name ) {
+			$clean = tsosi_sanitize_block_name( (string) $block_name );
+			if ( '' !== $clean ) {
+				$map[ $clean ] = true;
+			}
+		}
+	}
+	foreach ( tsosi_orphans_theme_signatures( 'blocks' ) as $block_name ) {
+		$clean = tsosi_sanitize_block_name( $block_name );
 		if ( '' !== $clean ) {
 			$map[ $clean ] = true;
 		}
@@ -179,8 +263,10 @@ function tsosi_orphans_harvest_from_index( $index ) {
 				}
 			}
 		}
-		$label = $post_id > 0 ? get_the_title( $post_id ) : '';
-		$edit  = $post_id > 0 ? get_edit_post_link( $post_id, 'raw' ) : '';
+		// Resolved lazily: looking up title/edit link for every indexed post cost one query per
+		// post even when the post had no tag at all.
+		$label = null;
+		$edit  = null;
 		foreach ( $blobs as $blob ) {
 			foreach ( tsosi_orphans_extract_shortcodes_from_blob( $blob ) as $tag ) {
 				if ( ! isset( $shortcodes[ $tag ] ) ) {
@@ -194,6 +280,10 @@ function tsosi_orphans_harvest_from_index( $index ) {
 					$samples['shortcodes'][ $tag ] = array();
 				}
 				if ( count( $samples['shortcodes'][ $tag ] ) < 5 ) {
+					if ( null === $label ) {
+						$label = $post_id > 0 ? get_the_title( $post_id ) : '';
+						$edit  = $post_id > 0 ? get_edit_post_link( $post_id, 'raw' ) : '';
+					}
 					$samples['shortcodes'][ $tag ][] = array(
 						'id'    => $post_id,
 						'title' => $label ? $label : (string) $post_id,
@@ -213,6 +303,10 @@ function tsosi_orphans_harvest_from_index( $index ) {
 					$samples['blocks'][ $block ] = array();
 				}
 				if ( count( $samples['blocks'][ $block ] ) < 5 ) {
+					if ( null === $label ) {
+						$label = $post_id > 0 ? get_the_title( $post_id ) : '';
+						$edit  = $post_id > 0 ? get_edit_post_link( $post_id, 'raw' ) : '';
+					}
 					$samples['blocks'][ $block ][] = array(
 						'id'    => $post_id,
 						'title' => $label ? $label : (string) $post_id,

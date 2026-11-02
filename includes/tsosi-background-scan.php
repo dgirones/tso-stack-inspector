@@ -18,6 +18,8 @@ if ( ! defined( 'TSOSI_OPTION_BACKGROUND_JOBS' ) ) {
 }
 
 /**
+ * Background get jobs.
+ *
  * @return array<int,int> user_id => timestamp scheduled.
  */
 function tsosi_background_get_jobs() {
@@ -26,6 +28,8 @@ function tsosi_background_get_jobs() {
 }
 
 /**
+ * Background register job.
+ *
  * @param int $user_id User ID.
  * @return void
  */
@@ -40,11 +44,13 @@ function tsosi_background_register_job( $user_id ) {
 	update_option( TSOSI_OPTION_BACKGROUND_JOBS, $jobs, false );
 	tsosi_release_lock( $lock );
 	if ( ! wp_next_scheduled( TSOSI_CRON_SCAN_HOOK ) ) {
-		wp_schedule_event( time() + 30, 'tsosi_every_minute', TSOSI_CRON_SCAN_HOOK );
+		wp_schedule_single_event( time() + 30, TSOSI_CRON_SCAN_HOOK );
 	}
 }
 
 /**
+ * Background unregister job.
+ *
  * @param int $user_id User ID.
  * @return void
  */
@@ -61,21 +67,6 @@ function tsosi_background_unregister_job( $user_id ) {
 		wp_clear_scheduled_hook( TSOSI_CRON_SCAN_HOOK );
 	}
 }
-
-/**
- * Custom cron schedule.
- *
- * @param array<string,array<string,int|string>> $schedules Schedules.
- * @return array<string,array<string,int|string>>
- */
-function tsosi_background_cron_schedules( $schedules ) {
-	$schedules['tsosi_every_minute'] = array(
-		'interval' => 60,
-		'display'  => 'TSO Stack Inspector (every minute)',
-	);
-	return $schedules;
-}
-add_filter( 'cron_schedules', 'tsosi_background_cron_schedules' );
 
 /**
  * Process one batch per registered background user job.
@@ -121,6 +112,11 @@ function tsosi_background_cron_runner() {
 		}
 
 		wp_set_current_user( $prev_user );
+	}
+
+	// Chain the next batch as a one-off event (no recurring sub-15-minute schedule).
+	if ( ! empty( tsosi_background_get_jobs() ) && ! wp_next_scheduled( TSOSI_CRON_SCAN_HOOK ) ) {
+		wp_schedule_single_event( time() + 60, TSOSI_CRON_SCAN_HOOK );
 	}
 }
 add_action( TSOSI_CRON_SCAN_HOOK, 'tsosi_background_cron_runner' );

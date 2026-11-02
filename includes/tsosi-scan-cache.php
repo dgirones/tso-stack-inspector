@@ -89,6 +89,8 @@ function tsosi_scan_cache_storage_dir() {
 }
 
 /**
+ * Scan content cache storage ready.
+ *
  * @return bool
  */
 function tsosi_scan_content_cache_storage_ready() {
@@ -96,6 +98,8 @@ function tsosi_scan_content_cache_storage_ready() {
 }
 
 /**
+ * Scan cache user suffix.
+ *
  * @return string
  */
 function tsosi_scan_cache_user_suffix() {
@@ -103,6 +107,8 @@ function tsosi_scan_cache_user_suffix() {
 }
 
 /**
+ * Scan cache index filename.
+ *
  * @param string $fingerprint Content fingerprint.
  * @return string Basename only.
  */
@@ -112,6 +118,8 @@ function tsosi_scan_cache_index_filename( $fingerprint ) {
 }
 
 /**
+ * Scan cache build filename.
+ *
  * @return string Basename only.
  */
 function tsosi_scan_cache_build_filename() {
@@ -119,6 +127,8 @@ function tsosi_scan_cache_build_filename() {
 }
 
 /**
+ * Scan cache file path.
+ *
  * @param string $basename File basename inside plugin uploads dir.
  * @return string Absolute path or empty.
  */
@@ -135,6 +145,8 @@ function tsosi_scan_cache_file_path( $basename ) {
 }
 
 /**
+ * Scan cache read json file.
+ *
  * @param string $path Absolute JSON file path.
  * @return array<string,mixed>|null
  */
@@ -152,6 +164,8 @@ function tsosi_scan_cache_read_json_file( $path ) {
 }
 
 /**
+ * Scan cache write json file.
+ *
  * @param string              $path Absolute JSON file path.
  * @param array<string,mixed> $data Data to encode.
  * @return bool
@@ -241,6 +255,8 @@ function tsosi_scan_delete_user_cache_files() {
 }
 
 /**
+ * Scan load build index.
+ *
  * @return array{posts:array<int,array<string,mixed>>,extras:array<int,array<string,mixed>>}
  */
 function tsosi_scan_load_build_index() {
@@ -263,6 +279,8 @@ function tsosi_scan_load_build_index() {
 }
 
 /**
+ * Scan save build index.
+ *
  * @param array{posts:array<int,array<string,mixed>>,extras:array<int,array<string,mixed>>} $index Index payload.
  * @return bool
  */
@@ -275,6 +293,8 @@ function tsosi_scan_save_build_index( $index ) {
 }
 
 /**
+ * Scan delete build index.
+ *
  * @return void
  */
 function tsosi_scan_delete_build_index() {
@@ -285,6 +305,8 @@ function tsosi_scan_delete_build_index() {
 }
 
 /**
+ * Content cache register hooks.
+ *
  * @return void
  */
 function tsosi_content_cache_register_hooks() {
@@ -292,6 +314,77 @@ function tsosi_content_cache_register_hooks() {
 	add_action( 'deactivated_plugin', 'tsosi_flush_content_cache' );
 }
 add_action( 'init', 'tsosi_content_cache_register_hooks' );
+
+/**
+ * The site index also holds widget, menu and theme-mod blobs, which the content
+ * fingerprint (post count + latest post modification) cannot see. Drop the cache when they
+ * change so scans and the orphan finder never report shortcodes/blocks that were removed.
+ *
+ * @param string $option Option name.
+ * @return void
+ */
+function tsosi_content_cache_maybe_flush_for_option( $option ) {
+	$option = (string) $option;
+	if ( 'sidebars_widgets' !== $option && 0 !== strpos( $option, 'widget_' ) && 0 !== strpos( $option, 'theme_mods_' ) ) {
+		return;
+	}
+	tsosi_content_cache_flush_once();
+}
+
+/**
+ * Flush all cached site indexes once per request.
+ *
+ * @return void
+ */
+function tsosi_content_cache_flush_once() {
+	static $done = false;
+	if ( $done ) {
+		return;
+	}
+	$done = true;
+	tsosi_flush_all_content_caches();
+}
+add_action( 'updated_option', 'tsosi_content_cache_maybe_flush_for_option' );
+add_action( 'added_option', 'tsosi_content_cache_maybe_flush_for_option' );
+add_action( 'deleted_option', 'tsosi_content_cache_maybe_flush_for_option' );
+add_action( 'wp_update_nav_menu', 'tsosi_content_cache_flush_once' );
+add_action( 'wp_update_nav_menu_item', 'tsosi_content_cache_flush_once' );
+add_action( 'wp_delete_nav_menu', 'tsosi_content_cache_flush_once' );
+add_action( 'switch_theme', 'tsosi_content_cache_flush_once' );
+
+/**
+ * Locate the cached site index for a fingerprint WITHOUT reading or decoding it.
+ *
+ * The index file can be several MB; the admin screen only needs to know whether a valid
+ * one exists, so this only checks the file (tsosi_scan_get_content_cache() decodes it).
+ *
+ * @param string $fingerprint Expected fingerprint.
+ * @return array{path:string,built_at:int}|null
+ */
+function tsosi_scan_locate_content_cache( $fingerprint ) {
+	$fingerprint = (string) $fingerprint;
+	$meta        = get_transient( tsosi_content_cache_transient_key() );
+
+	if ( is_array( $meta ) && ! empty( $meta['fingerprint'] ) && (string) $meta['fingerprint'] === $fingerprint && ! empty( $meta['file'] ) ) {
+		$path = tsosi_scan_cache_file_path( (string) $meta['file'] );
+		if ( '' !== $path && is_readable( $path ) && filesize( $path ) > 0 ) {
+			return array(
+				'path'     => $path,
+				'built_at' => isset( $meta['built_at'] ) ? absint( $meta['built_at'] ) : 0,
+			);
+		}
+	}
+
+	$path = tsosi_scan_cache_file_path( tsosi_scan_cache_index_filename( $fingerprint ) );
+	if ( '' !== $path && is_readable( $path ) && filesize( $path ) > 0 ) {
+		return array(
+			'path'     => $path,
+			'built_at' => (int) filemtime( $path ),
+		);
+	}
+
+	return null;
+}
 
 /**
  * Cache status for admin UI.
@@ -303,9 +396,9 @@ function tsosi_scan_get_cache_status() {
 	$post_ids = tsosi_scan_collect_post_ids( $settings );
 	$extras   = tsosi_scan_collect_extra_targets( $settings );
 	$fp       = tsosi_scan_content_fingerprint( $settings, $post_ids, $extras );
-	$cache    = tsosi_scan_get_content_cache( $fp );
+	$found    = tsosi_scan_locate_content_cache( $fp );
 
-	if ( ! is_array( $cache ) || empty( $cache['index'] ) ) {
+	if ( null === $found ) {
 		return array(
 			'ready'    => false,
 			'built_at' => 0,
@@ -313,8 +406,7 @@ function tsosi_scan_get_cache_status() {
 		);
 	}
 
-	$meta     = get_transient( tsosi_content_cache_transient_key() );
-	$built_at = is_array( $meta ) && isset( $meta['built_at'] ) ? absint( $meta['built_at'] ) : 0;
+	$built_at = $found['built_at'];
 
 	return array(
 		'ready'       => true,
@@ -325,6 +417,8 @@ function tsosi_scan_get_cache_status() {
 }
 
 /**
+ * Scan rebuild content cache.
+ *
  * @return void
  */
 function tsosi_scan_rebuild_content_cache() {
@@ -388,7 +482,7 @@ function tsosi_scan_get_max_post_modified_gmt() {
  */
 function tsosi_scan_content_fingerprint( $settings, $post_ids, $extras ) {
 	$payload = array(
-		'v'            => 1,
+		'v'            => 3, // 3: digests unescape JSON slashes so builder-stored block names match.
 		'blog_id'      => get_current_blog_id(),
 		'settings'     => $settings,
 		'post_count'   => count( $post_ids ),
@@ -397,10 +491,12 @@ function tsosi_scan_content_fingerprint( $settings, $post_ids, $extras ) {
 	);
 
 	$json = wp_json_encode( $payload );
-	return md5( is_string( $json ) ? $json : serialize( $payload ) );
+	return md5( is_string( $json ) ? $json : maybe_serialize( $payload ) );
 }
 
 /**
+ * Scan get content cache.
+ *
  * @param string $fingerprint Expected fingerprint.
  * @return array<string,mixed>|null
  */
@@ -543,6 +639,8 @@ function tsosi_index_job_transient_key() {
 }
 
 /**
+ * Index job cancel.
+ *
  * @return void
  */
 function tsosi_index_job_cancel() {
@@ -706,14 +804,7 @@ function tsosi_index_job_step() {
 	$extra_index = isset( $job['extra_index'] ) ? (int) $job['extra_index'] : 0;
 	$index       = tsosi_scan_load_build_index();
 
-	$batch = array_slice( $post_ids, $offset, TSOSI_SCAN_BATCH_SIZE );
-	foreach ( $batch as $post_id ) {
-		$source = tsosi_scan_extract_post_source( (int) $post_id );
-		if ( is_array( $source ) ) {
-			$index['posts'][] = $source;
-		}
-		++$offset;
-	}
+	$offset = tsosi_scan_extract_post_batch( $post_ids, $offset, $index );
 
 	if ( ! tsosi_scan_save_build_index( $index ) ) {
 		tsosi_index_job_cancel();
@@ -789,6 +880,8 @@ function tsosi_index_job_step() {
 }
 
 /**
+ * Scan save content cache.
+ *
  * @param string              $fingerprint Fingerprint.
  * @param array<string,mixed> $index       Cached index payload.
  * @return void
@@ -806,6 +899,17 @@ function tsosi_scan_save_content_cache( $fingerprint, $index ) {
 
 	tsosi_scan_delete_build_index();
 
+	// A new fingerprint means the previous index of this user is obsolete; without this every
+	// content edit left another multi-MB cache-index file behind in uploads.
+	$stale = glob( tsosi_scan_cache_storage_dir() . '/cache-index-' . tsosi_scan_cache_user_suffix() . '-*.json' );
+	if ( is_array( $stale ) ) {
+		foreach ( $stale as $old_file ) {
+			if ( is_string( $old_file ) && basename( $old_file ) !== $filename && is_file( $old_file ) ) {
+				wp_delete_file( $old_file );
+			}
+		}
+	}
+
 	set_transient(
 		tsosi_content_cache_transient_key(),
 		array(
@@ -815,6 +919,95 @@ function tsosi_scan_save_content_cache( $fingerprint, $index ) {
 		),
 		TSOSI_CONTENT_CACHE_TTL
 	);
+}
+
+/**
+ * Warm the post and post-meta object caches for a set of IDs in two queries, instead of
+ * one get_post() and one meta query per post while the index is extracted.
+ *
+ * @param int[] $post_ids Post IDs.
+ * @return void
+ */
+function tsosi_scan_prime_post_caches( $post_ids ) {
+	$post_ids = array_values( array_filter( array_map( 'absint', (array) $post_ids ) ) );
+	if ( empty( $post_ids ) ) {
+		return;
+	}
+	if ( function_exists( '_prime_post_caches' ) ) {
+		_prime_post_caches( $post_ids, false, true );
+		return;
+	}
+	update_meta_cache( 'post', $post_ids );
+}
+
+/**
+ * Extract as many posts as fit in a time budget (bounded by TSOSI_SCAN_BATCH_MAX) from
+ * $offset onwards and append them to $index.
+ *
+ * Every step of a batched job re-reads and re-writes the whole (growing) build index, so
+ * fewer, larger steps avoid the quadratic I/O of a fixed 25-post step on big sites.
+ *
+ * @param int[]               $post_ids Ordered post IDs of the job.
+ * @param int                 $offset   First unprocessed position.
+ * @param array<string,mixed> $index    Build index (posts are appended, by reference).
+ * @return int New offset.
+ */
+function tsosi_scan_extract_post_batch( $post_ids, $offset, &$index ) {
+	$offset = max( 0, (int) $offset );
+	$slice  = array_slice( $post_ids, $offset, TSOSI_SCAN_BATCH_MAX );
+	if ( empty( $slice ) ) {
+		return $offset;
+	}
+
+	$start = microtime( true );
+	foreach ( array_chunk( $slice, max( 1, (int) TSOSI_SCAN_BATCH_SIZE ) ) as $chunk ) {
+		tsosi_scan_prime_post_caches( $chunk );
+		foreach ( $chunk as $post_id ) {
+			$source = tsosi_scan_extract_post_source( (int) $post_id );
+			if ( is_array( $source ) ) {
+				$index['posts'][] = $source;
+			}
+			++$offset;
+		}
+		if ( ( microtime( true ) - $start ) >= TSOSI_SCAN_STEP_TIME_BUDGET ) {
+			break;
+		}
+	}
+
+	return $offset;
+}
+
+/**
+ * Reduce a text to the fragments the matchers actually look at: every "[tag" (plus the one
+ * character that follows it, which the orphan finder needs) and every "<!-- wp:name" block
+ * comment, de-duplicated. Running the scan / orphan regexes over this digest gives the same
+ * tags and blocks as running them over the original text, at a fraction of the size.
+ *
+ * @param mixed $text Post content or builder meta value.
+ * @return string Newline-separated fragments ('' when there is nothing to match).
+ */
+function tsosi_scan_digest_text( $text ) {
+	if ( ! is_string( $text ) || '' === $text ) {
+		return '';
+	}
+
+	// Builder meta is JSON: "<!-- wp:acme\/hero" must be read as "wp:acme/hero".
+	$text  = tsosi_scan_unescape_json_slashes( $text );
+	$parts = array();
+	if ( preg_match_all( '/\[[a-z0-9_-]+(?=([\s\S]?))/i', $text, $shortcodes ) ) {
+		foreach ( $shortcodes[0] as $i => $open ) {
+			// "." marks "end of text right after the tag" (not a valid tag/terminator character),
+			// so the joining newline can never make a tag at the very end look terminated.
+			$parts[ $open . ( '' === $shortcodes[1][ $i ] ? '.' : $shortcodes[1][ $i ] ) ] = true;
+		}
+	}
+	if ( preg_match_all( '/<!--\s*wp:[a-z0-9_\/-]*/i', $text, $blocks ) ) {
+		foreach ( $blocks[0] as $comment ) {
+			$parts[ $comment ] = true;
+		}
+	}
+
+	return implode( "\n", array_keys( $parts ) );
 }
 
 /**
@@ -830,7 +1023,15 @@ function tsosi_scan_extract_post_source( $post_id ) {
 		return null;
 	}
 
-	$builder_blobs = tsosi_scan_collect_builder_blobs( $post_id );
+	// Only the shortcode/block markers are ever matched later (scan, audit, orphans), so store
+	// those instead of the full text: page-builder meta alone can be hundreds of KB per post.
+	$builder_blobs = array();
+	foreach ( tsosi_scan_collect_builder_blobs( $post_id ) as $blob ) {
+		$digest = tsosi_scan_digest_text( $blob );
+		if ( '' !== $digest ) {
+			$builder_blobs[] = $digest;
+		}
+	}
 
 	$custom_keys = get_post_custom_keys( $post_id );
 	$meta_keys   = array();
@@ -846,7 +1047,7 @@ function tsosi_scan_extract_post_source( $post_id ) {
 	return array(
 		'kind'          => 'post',
 		'post_id'       => $post_id,
-		'content'       => (string) $post->post_content,
+		'content'       => tsosi_scan_digest_text( (string) $post->post_content ),
 		'meta_keys'     => array_values( array_unique( $meta_keys ) ),
 		'builder_blobs' => $builder_blobs,
 	);
@@ -864,11 +1065,30 @@ function tsosi_scan_match_post_source( $source, $needles ) {
 		return array();
 	}
 
+	// Most posts do not match: run the (pure string) matching without a post object first
+	// and only load the WP_Post -- used for title/edit link -- when something matched.
+	// Loading it up front cost one get_post() per indexed post on every scan/audit run.
+	if ( empty( tsosi_scan_match_post_source_with( $source, $needles, null ) ) ) {
+		return array();
+	}
+
 	$post = get_post( (int) $source['post_id'] );
 	if ( ! $post instanceof WP_Post ) {
 		return array();
 	}
 
+	return tsosi_scan_match_post_source_with( $source, $needles, $post );
+}
+
+/**
+ * Match one cached post source against needles.
+ *
+ * @param array<string,mixed> $source  Cached post source.
+ * @param array<string,mixed> $needles Needles.
+ * @param WP_Post|null        $post    Post used for result labels (null: matching only).
+ * @return array<int,array<string,mixed>>
+ */
+function tsosi_scan_match_post_source_with( $source, $needles, $post ) {
 	$tags   = isset( $needles['shortcodes'] ) && is_array( $needles['shortcodes'] ) ? $needles['shortcodes'] : array();
 	$blocks = isset( $needles['blocks'] ) && is_array( $needles['blocks'] ) ? $needles['blocks'] : array();
 	$found  = array();
@@ -1028,6 +1248,8 @@ function tsosi_scan_extract_autoload_option_sources() {
 }
 
 /**
+ * Scan extract menu source.
+ *
  * @param array<string,mixed> $target Menu target descriptor.
  * @return array<string,mixed>|null
  */
@@ -1077,8 +1299,8 @@ function tsosi_scan_extract_extra_sources( $target ) {
 		$menu = tsosi_scan_extract_menu_source( $target );
 		return $menu ? array( $menu ) : array();
 	}
-	if ( 'theme_mods' === $type ) {
-		// Needle-dependent: scanned live via tsosi_scan_theme_mods(), not stored in the content index.
+	if ( 'theme_mods' === $type || 'theme_templates' === $type ) {
+		// Needle-dependent: scanned live via tsosi_scan_theme_mods() / tsosi_scan_theme_templates().
 		return array();
 	}
 
@@ -1153,6 +1375,8 @@ function tsosi_scan_match_blob_sources( $rows, $needles ) {
 }
 
 /**
+ * Scan match menu source.
+ *
  * @param array<string,mixed> $source  Cached menu source.
  * @param array<string,mixed> $needles Needles.
  * @return array<int,array<string,mixed>>
@@ -1208,8 +1432,11 @@ function tsosi_scan_match_cached_index( $index, $needles ) {
 
 	$posts = isset( $index['posts'] ) && is_array( $index['posts'] ) ? $index['posts'] : array();
 	foreach ( $posts as $source ) {
-		if ( is_array( $source ) ) {
-			$results = array_merge( $results, tsosi_scan_match_post_source( $source, $needles ) );
+		if ( ! is_array( $source ) ) {
+			continue;
+		}
+		foreach ( tsosi_scan_match_post_source( $source, $needles ) as $row ) {
+			$results[] = $row;
 		}
 	}
 
@@ -1242,6 +1469,10 @@ function tsosi_scan_match_cached_index( $index, $needles ) {
 	if ( ! empty( $settings['include_theme_mods'] ) || tsosi_scan_needles_want_theme_mods( $needles ) ) {
 		$results = array_merge( $results, tsosi_scan_theme_mods( $needles ) );
 	}
+	// Shortcodes/blocks hardcoded in the active theme (header.php / functions.php, etc.).
+	$results = array_merge( $results, tsosi_scan_theme_templates( $needles ) );
+	// Custom fields, excerpts, term descriptions and non-autoload options (needle-dependent).
+	$results = array_merge( $results, tsosi_scan_db_values( $needles ) );
 	if ( ! empty( $settings['include_user_meta'] ) ) {
 		$results = array_merge( $results, tsosi_scan_user_meta( $needles ) );
 	}
@@ -1271,7 +1502,32 @@ function tsosi_scan_build_complete_response( $needles, $results, $post_count, $e
 		tsosi_scan_filter_cross_plugin_false_positives( $results, is_array( $query ) ? $query : array() )
 	);
 	$total_steps = $post_count + $extra_count;
-	$response    = array(
+	$query_array = is_array( $query ) ? $query : array();
+	$risk        = tsosi_scan_assess_query_aware_risk( $results, $query_array );
+	$usage       = null;
+	if ( isset( $query_array['mode'] ) && 'plugin' === sanitize_key( (string) $query_array['mode'] ) && ! empty( $query_array['plugin_file'] ) ) {
+		// Content matches alone cannot prove a plugin is unused: add the "is it running /
+		// does anything depend on it" signals and let them raise the verdict.
+		$usage = tsosi_usage_collect(
+			(string) $query_array['plugin_file'],
+			array(
+				'prefixes' => array_merge(
+					isset( $needles['option_prefixes'] ) ? (array) $needles['option_prefixes'] : array(),
+					isset( $needles['meta_prefixes'] ) ? (array) $needles['meta_prefixes'] : array()
+				),
+			)
+		);
+		$risk  = tsosi_usage_apply_risk( $risk, $usage );
+	} elseif ( isset( $query_array['mode'] ) && 'theme' === sanitize_key( (string) $query_array['mode'] ) ) {
+		$theme_slug = isset( $query_array['theme'] ) && '' !== (string) $query_array['theme'] ? sanitize_text_field( (string) $query_array['theme'] ) : get_stylesheet();
+		$usage      = tsosi_usage_collect_theme( $theme_slug );
+		// The "this is your active theme" notice stays; every other theme gets the same
+		// escalation as plugins when something still depends on it.
+		if ( empty( $usage['active'] ) ) {
+			$risk = tsosi_usage_apply_risk( $risk, $usage );
+		}
+	}
+	$response = array(
 		'done'              => true,
 		'cached'            => $from_cache,
 		'progress'          => 100,
@@ -1283,13 +1539,15 @@ function tsosi_scan_build_complete_response( $needles, $results, $post_count, $e
 		'result_count'      => count( $results ),
 		'needles'           => $needles,
 		'needles_empty'     => tsosi_scan_needles_are_empty( $needles ),
-		'risk'              => tsosi_scan_assess_query_aware_risk( $results, is_array( $query ) ? $query : array() ),
+		'risk'              => $risk,
+		'usage'             => $usage,
 		'cleaner_url'       => tsosi_get_options_cleaner_url_from_needles(
 			$needles,
 			isset( $query['plugin_file'] ) ? (string) $query['plugin_file'] : ''
 		),
 		'cleaner_available' => tsosi_options_cleaner_is_available(),
 		'plugin_file'       => isset( $query['plugin_file'] ) ? (string) $query['plugin_file'] : '',
+		'plugin_active'     => isset( $query['plugin_file'] ) && '' !== (string) $query['plugin_file'] && tsosi_is_plugin_active_file( (string) $query['plugin_file'] ),
 	);
 
 	if ( is_array( $query ) && ! empty( $query ) ) {

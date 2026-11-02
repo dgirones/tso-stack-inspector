@@ -39,6 +39,8 @@ function tsosi_scan_history_get_max() {
 }
 
 /**
+ * Scan history get index.
+ *
  * @return array<int,array<string,mixed>>
  */
 function tsosi_scan_history_get_index() {
@@ -107,6 +109,8 @@ function tsosi_scan_history_enforce_max() {
 }
 
 /**
+ * Scan history save.
+ *
  * @param array<string,mixed>            $query   Scan query.
  * @param array<int,array<string,mixed>> $results Results.
  * @param array<string,mixed>            $meta    Summary meta.
@@ -117,7 +121,7 @@ function tsosi_scan_history_save( $query, $results, $meta ) {
 		return '';
 	}
 
-	$id       = gmdate( 'Ymd-His' ) . '-' . wp_generate_password( 6, false, false );
+	$id       = gmdate( 'Ymd-His' ) . '-' . wp_generate_password( 16, false, false );
 	$filename = 'history-' . tsosi_scan_cache_user_suffix() . '-' . sanitize_file_name( $id ) . '.json';
 	$path     = tsosi_scan_cache_file_path( $filename );
 	if ( '' === $path ) {
@@ -158,6 +162,8 @@ function tsosi_scan_history_save( $query, $results, $meta ) {
 }
 
 /**
+ * Scan history build label.
+ *
  * @param array<string,mixed> $query Scan query.
  * @return string
  */
@@ -184,6 +190,8 @@ function tsosi_scan_history_build_label( $query ) {
 }
 
 /**
+ * Scan history load.
+ *
  * @param string $id History entry id.
  * @return array<string,mixed>|null
  */
@@ -245,6 +253,8 @@ function tsosi_scan_history_delete( $id ) {
 }
 
 /**
+ * Scan history delete all.
+ *
  * @return void
  */
 function tsosi_scan_history_delete_all() {

@@ -10,13 +10,17 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
+ * Admin assets version.
+ *
  * @return string
  */
 function tsosi_admin_assets_version() {
-	return defined( 'TSOSI_VERSION' ) ? TSOSI_VERSION : '1.0.0';
+	return defined( 'TSOSI_VERSION' ) ? TSOSI_VERSION : '1.0.4';
 }
 
 /**
+ * Admin asset file version.
+ *
  * @param string $relative_path Path relative to plugin root.
  * @return string
  */
@@ -55,6 +59,11 @@ function tsosi_admin_enqueue_assets( $hook_suffix ) {
 		array(),
 		tsosi_admin_asset_file_version( 'assets/css/report.css' )
 	);
+
+	// Applied in <head>, before first paint, so switching tabs never flashes the day theme.
+	wp_register_script( 'tso-stack-inspector-theme-boot', false, array(), tsosi_admin_assets_version(), false );
+	wp_enqueue_script( 'tso-stack-inspector-theme-boot' );
+	wp_add_inline_script( 'tso-stack-inspector-theme-boot', tsosi_get_theme_boot_script() );
 
 	wp_enqueue_script(
 		'tso-stack-inspector-admin',
@@ -103,6 +112,8 @@ function tsosi_admin_get_js_config() {
 
 	return array(
 		'ajaxUrl'           => admin_url( 'admin-ajax.php' ),
+		'themeCoords'       => tsosi_theme_coords(),
+		'themeI18n'         => tsosi_theme_i18n(),
 		'nonce'             => wp_create_nonce( TSOSI_NONCE_AJAX ),
 		'lang'              => $lang,
 		'batchSize'         => TSOSI_SCAN_BATCH_SIZE,
@@ -199,6 +210,12 @@ function tsosi_admin_get_js_config() {
 			'auditColAction'         => tsosi_ui_triple_text( 'Action', 'Acción', 'Acció' ),
 			'auditOpenScan'          => tsosi_ui_triple_text( 'Open scan', 'Abrir escaneo', 'Obrir escaneig' ),
 			'cleanerCta'             => tsosi_ui_triple_text( 'Clean leftovers in Options Cleaner', 'Limpiar restos en Options Cleaner', 'Netejar restes a Options Cleaner' ),
+			'usageDetails'           => tsosi_ui_triple_text( 'Details', 'Detalles', 'Detalls' ),
+			'cleanerAfter'           => tsosi_ui_triple_text(
+				'Options Cleaner is for after uninstalling: deactivate and uninstall the plugin first, then clean its leftovers.',
+				'Options Cleaner es para después de desinstalar: desactiva y desinstala primero el plugin y luego limpia sus restos.',
+				'Options Cleaner és per a després de desinstal·lar: desactiva i desinstal·la primer el plugin i després neteja\'n les restes.'
+			),
 			'cleanerMissing'         => tsosi_ui_triple_text(
 				'Install/activate TSO Options & Tables Cleaner to remove leftover options and tables after uninstall.',
 				'Instala/activa TSO Options & Tables Cleaner para borrar opciones y tablas sobrantes tras desinstalar.',
@@ -258,6 +275,17 @@ function tsosi_admin_get_js_config() {
 			'copied'                 => tsosi_ui_triple_text( 'Copied', 'Copiado', 'Copiat' ),
 			'replaceTag'             => tsosi_ui_triple_text( 'Replace', 'Sustituir', 'Substitueix' ),
 			'indexBuilding'          => tsosi_ui_triple_text( 'Preparing site index… %s%', 'Preparando índice… %s%', 'Preparant índex… %s%' ),
+			'profilesBuilding'       => tsosi_ui_triple_text( 'Preparing plugin signatures… %s%', 'Preparando las firmas de plugins… %s%', 'Preparant les signatures dels plugins… %s%' ),
+			'profilesReady'          => tsosi_ui_triple_text(
+				'Plugin signatures are ready. Reload the page to see them in the lists.',
+				'Las firmas de plugins están listas. Recarga la página para verlas en las listas.',
+				'Les signatures dels plugins estan a punt. Recarrega la pàgina per veure-les a les llistes.'
+			),
+			'profilesFail'           => tsosi_ui_triple_text(
+				'Could not prepare plugin signatures. Try "Refresh signatures".',
+				'No se pudieron preparar las firmas de plugins. Prueba "Actualizar firmas".',
+				'No s\'han pogut preparar les signatures dels plugins. Prova "Actualitzar signatures".'
+			),
 			'indexReadyLabel'        => tsosi_ui_triple_text( 'Site index cached', 'Índice del sitio en caché', 'Índex del lloc en memòria cau' ),
 			'indexRebuilt'           => tsosi_ui_triple_text( 'Site index rebuilt.', 'Índice del sitio reconstruido.', 'Índex del lloc reconstruït.' ),
 			'checklistTitle'         => tsosi_ui_triple_text( 'Before you uninstall', 'Antes de desinstalar', 'Abans de desinstal·lar' ),
@@ -269,4 +297,106 @@ function tsosi_admin_get_js_config() {
 		),
 		'cleanerAvailable'  => tsosi_options_cleaner_is_available(),
 	);
+}
+
+/**
+ * Approximate latitude/longitude for sunrise/sunset, from the site timezone.
+ *
+ * @return array{lat: float, lng: float}
+ */
+function tsosi_theme_coords() {
+	$tz  = function_exists( 'wp_timezone_string' ) ? (string) wp_timezone_string() : (string) get_option( 'timezone_string', '' );
+	$map = array(
+		'Europe/Madrid'                  => array( 40.42, -3.70 ),
+		'Europe/Andorra'                 => array( 42.51, 1.52 ),
+		'Atlantic/Canary'                => array( 28.29, -16.63 ),
+		'Europe/London'                  => array( 51.51, -0.13 ),
+		'Europe/Paris'                   => array( 48.86, 2.35 ),
+		'Europe/Berlin'                  => array( 52.52, 13.41 ),
+		'Europe/Rome'                    => array( 41.90, 12.50 ),
+		'Europe/Lisbon'                  => array( 38.72, -9.14 ),
+		'America/Mexico_City'            => array( 19.43, -99.13 ),
+		'America/New_York'               => array( 40.71, -74.01 ),
+		'America/Los_Angeles'            => array( 34.05, -118.24 ),
+		'America/Argentina/Buenos_Aires' => array( -34.60, -58.38 ),
+		'America/Bogota'                 => array( 4.71, -74.07 ),
+		'America/Santiago'               => array( -33.45, -70.67 ),
+		'UTC'                            => array( 0.0, 0.0 ),
+	);
+	if ( isset( $map[ $tz ] ) ) {
+		return array(
+			'lat' => (float) $map[ $tz ][0],
+			'lng' => (float) $map[ $tz ][1],
+		);
+	}
+	return array(
+		'lat' => 41.39,
+		'lng' => 2.17,
+	);
+}
+
+/**
+ * Theme toggle labels for admin.js.
+ *
+ * @return array<string,string>
+ */
+function tsosi_theme_i18n() {
+	return array(
+		'themeDay'      => tsosi_ui_triple_text( 'Day mode', 'Modo día', 'Mode dia' ),
+		'themeNight'    => tsosi_ui_triple_text( 'Night mode', 'Modo noche', 'Mode nit' ),
+		'themeAuto'     => tsosi_ui_triple_text( 'Auto mode', 'Modo auto', 'Mode auto' ),
+		'themeAutoHint' => tsosi_ui_triple_text( 'Follows sunrise and sunset', 'Sigue la salida y la puesta de sol', 'Segueix la sortida i la posta de sol' ),
+	);
+}
+
+/**
+ * Boot script: resolves auto/day/night from localStorage + local sunrise/sunset and tags <html>
+ * before the page paints. Also exposes window.tsosiThemeBoot for admin.js.
+ *
+ * @return string
+ */
+function tsosi_get_theme_boot_script() {
+	$js = <<<'JS'
+(function () {
+	var KEY = 'tsosi_ui_theme';
+	var C = __TSOSI_COORDS__;
+	var RAD = Math.PI / 180, DAY_MS = 86400000, J1970 = 2440588, J2000 = 2451545, E = RAD * 23.4397;
+	function readPref() {
+		var v = '';
+		try { v = window.localStorage.getItem(KEY) || ''; } catch (e) { v = ''; }
+		return (v === 'day' || v === 'night' || v === 'auto') ? v : 'auto';
+	}
+	function sunTimes(date, lat, lng) {
+		try {
+			var lw = RAD * -lng, phi = RAD * lat;
+			var d = date.valueOf() / DAY_MS - 0.5 + J1970 - J2000;
+			var n = Math.round(d - 0.0009 - lw / (2 * Math.PI));
+			var ds = 0.0009 + lw / (2 * Math.PI) + n;
+			var M = RAD * (357.5291 + 0.98560028 * ds);
+			var Cc = RAD * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M));
+			var L = M + Cc + RAD * 102.9372 + Math.PI;
+			var dec = Math.asin(Math.sin(E) * Math.sin(L));
+			var w = Math.acos((Math.sin(-0.833 * RAD) - Math.sin(phi) * Math.sin(dec)) / (Math.cos(phi) * Math.cos(dec)));
+			var a = 0.0009 + (w + lw) / (2 * Math.PI) + n;
+			var jset = J2000 + a + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L);
+			var jnoon = J2000 + ds + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L);
+			var f = function (j) { return new Date((j + 0.5 - J1970) * DAY_MS); };
+			var rise = f(jnoon - (jset - jnoon)), set = f(jset);
+			return (isNaN(rise.getTime()) || isNaN(set.getTime())) ? null : { rise: rise, set: set };
+		} catch (e2) { return null; }
+	}
+	function solar() {
+		var now = new Date();
+		var t = sunTimes(now, parseFloat(C.lat), parseFloat(C.lng));
+		if (!t) { var h = now.getHours(); return (h >= 7 && h < 20) ? 'day' : 'night'; }
+		return (now >= t.rise && now < t.set) ? 'day' : 'night';
+	}
+	function resolve(pref) { return pref === 'auto' ? solar() : pref; }
+	window.tsosiThemeBoot = { key: KEY, readPref: readPref, resolve: resolve, solar: solar };
+	var pref = readPref();
+	document.documentElement.setAttribute('data-tsosi-theme', resolve(pref));
+	document.documentElement.setAttribute('data-tsosi-theme-pref', pref);
+})();
+JS;
+	return str_replace( '__TSOSI_COORDS__', wp_json_encode( tsosi_theme_coords() ), $js );
 }

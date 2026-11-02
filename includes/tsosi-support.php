@@ -97,6 +97,8 @@ function tsosi_get_plugin_list_description() {
 }
 
 /**
+ * Get open inspector link label.
+ *
  * @return string
  */
 function tsosi_get_open_inspector_link_label() {
@@ -112,6 +114,8 @@ function tsosi_get_open_inspector_link_label() {
 }
 
 /**
+ * Get blog link label.
+ *
  * @return string
  */
 function tsosi_get_blog_link_label() {
@@ -122,6 +126,8 @@ function tsosi_get_blog_link_label() {
 }
 
 /**
+ * Get donate link label.
+ *
  * @return string
  */
 function tsosi_get_donate_link_label() {

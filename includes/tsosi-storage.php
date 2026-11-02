@@ -45,6 +45,10 @@ if ( ! defined( 'TSOSI_TRANSIENT_PLUGIN_PROFILE' ) ) {
 	define( 'TSOSI_TRANSIENT_PLUGIN_PROFILE', 'tso_stack_inspector_plugin_profile' );
 }
 
+if ( ! defined( 'TSOSI_TRANSIENT_PLUGIN_PROFILE_PARTIAL' ) ) {
+	define( 'TSOSI_TRANSIENT_PLUGIN_PROFILE_PARTIAL', 'tso_stack_inspector_plugin_profile_part' );
+}
+
 if ( ! defined( 'TSOSI_USER_META_UI_LANG' ) ) {
 	define( 'TSOSI_USER_META_UI_LANG', 'tso_stack_inspector_ui_lang' );
 }
@@ -124,13 +128,13 @@ function tsosi_verify_admin_form_nonce( $query_arg = '_wpnonce' ) {
  * Read sanitized POST text after AJAX nonce verification.
  *
  * @param string $key     POST key.
- * @param string $default Default when missing.
+ * @param string $fallback Default when missing.
  * @return string
  */
-function tsosi_get_ajax_post_text( $key, $default = '' ) {
+function tsosi_get_ajax_post_text( $key, $fallback = '' ) {
 	$key = (string) $key;
 	if ( '' === $key || ! isset( $_POST[ $key ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via check_ajax_referer() / tsosi_ajax_require_manage_options().
-		return $default;
+		return $fallback;
 	}
 	return sanitize_text_field( (string) wp_unslash( $_POST[ $key ] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via check_ajax_referer() / tsosi_ajax_require_manage_options().
 }
@@ -139,28 +143,50 @@ function tsosi_get_ajax_post_text( $key, $default = '' ) {
  * Read sanitized admin query arg.
  *
  * @param string $key     Query arg key.
- * @param string $default Default when missing.
+ * @param string $fallback Default when missing.
  * @return string
  */
-function tsosi_get_admin_query_arg( $key, $default = '' ) {
+function tsosi_get_admin_query_arg( $key, $fallback = '' ) {
 	$key = (string) $key;
 	if ( '' === $key || ! isset( $_GET[ $key ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display parameter.
-		return $default;
+		return $fallback;
 	}
 	return sanitize_text_field( (string) wp_unslash( $_GET[ $key ] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display parameter.
+}
+
+/**
+ * Whether an admin query arg is present (presence gate only; the value is never used).
+ *
+ * @param string $key Query arg key.
+ * @return bool
+ */
+function tsosi_admin_query_arg_is_set( $key ) {
+	$key = (string) $key;
+	return '' !== $key && isset( $_GET[ $key ] ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- presence gate only; callers verify the nonce before acting.
+}
+
+/**
+ * Whether an admin POST key is present (presence gate only; the value is never used).
+ *
+ * @param string $key POST key.
+ * @return bool
+ */
+function tsosi_admin_post_is_set( $key ) {
+	$key = (string) $key;
+	return '' !== $key && isset( $_POST[ $key ] ); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- presence gate only; callers verify the nonce before acting.
 }
 
 /**
  * Read sanitized admin POST text after form nonce verification.
  *
  * @param string $key     POST key.
- * @param string $default Default when missing.
+ * @param string $fallback Default when missing.
  * @return string
  */
-function tsosi_get_admin_post_text( $key, $default = '' ) {
+function tsosi_get_admin_post_text( $key, $fallback = '' ) {
 	$key = (string) $key;
 	if ( '' === $key || ! isset( $_POST[ $key ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via check_admin_referer() / tsosi_require_admin_form_nonce().
-		return $default;
+		return $fallback;
 	}
 	return sanitize_text_field( (string) wp_unslash( $_POST[ $key ] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via check_admin_referer() / tsosi_require_admin_form_nonce().
 }
@@ -169,13 +195,13 @@ function tsosi_get_admin_post_text( $key, $default = '' ) {
  * Read sanitized admin POST textarea after form nonce verification.
  *
  * @param string $key     POST key.
- * @param string $default Default when missing.
+ * @param string $fallback Default when missing.
  * @return string
  */
-function tsosi_get_admin_post_textarea( $key, $default = '' ) {
+function tsosi_get_admin_post_textarea( $key, $fallback = '' ) {
 	$key = (string) $key;
 	if ( '' === $key || ! isset( $_POST[ $key ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via check_admin_referer() / tsosi_require_admin_form_nonce().
-		return $default;
+		return $fallback;
 	}
 	return sanitize_textarea_field( (string) wp_unslash( $_POST[ $key ] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Caller verified via check_admin_referer() / tsosi_require_admin_form_nonce().
 }
@@ -341,6 +367,8 @@ function tsosi_get_default_scan_settings() {
 }
 
 /**
+ * Get scan settings.
+ *
  * @return array<string,mixed>
  */
 function tsosi_get_scan_settings() {
@@ -352,6 +380,8 @@ function tsosi_get_scan_settings() {
 }
 
 /**
+ * Update scan settings.
+ *
  * @param array<string,mixed> $settings Settings.
  * @return void
  */
@@ -359,13 +389,13 @@ function tsosi_update_scan_settings( $settings ) {
 	if ( ! is_array( $settings ) ) {
 		return;
 	}
-	$defaults = tsosi_get_default_scan_settings();
-	$clean    = array(
+	$fallbacks = tsosi_get_default_scan_settings();
+	$clean     = array(
 		'post_statuses'                => array_values(
 			array_filter(
 				array_map(
 					'sanitize_key',
-					(array) ( $settings['post_statuses'] ?? $defaults['post_statuses'] )
+					(array) ( $settings['post_statuses'] ?? $fallbacks['post_statuses'] )
 				)
 			)
 		),
@@ -410,6 +440,25 @@ function tsosi_scan_job_transient_key() {
  * @return array{path:string,url:string,error:bool}
  */
 function tsosi_get_uploads_dir() {
+	// Memoized per request (and per site on multisite): this is called for every cache
+	// file path, and each call used to stat/mkdir/rewrite the protection files again.
+	static $memo = array();
+
+	$blog_id = function_exists( 'get_current_blog_id' ) ? (int) get_current_blog_id() : 0;
+	if ( isset( $memo[ $blog_id ] ) ) {
+		return $memo[ $blog_id ];
+	}
+
+	$memo[ $blog_id ] = tsosi_get_uploads_dir_uncached();
+	return $memo[ $blog_id ];
+}
+
+/**
+ * Get uploads dir uncached.
+ *
+ * @return array{path:string,url:string,error:bool}
+ */
+function tsosi_get_uploads_dir_uncached() {
 	$upload = wp_upload_dir();
 	if ( ! empty( $upload['error'] ) ) {
 		return array(

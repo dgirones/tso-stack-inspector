@@ -104,7 +104,7 @@ function tsosi_get_options_cleaner_scan_url( $plugin_file = '', $prefixes = arra
 
 	$plugin_file = tsosi_sanitize_plugin_file( (string) $plugin_file );
 	if ( '' !== $plugin_file ) {
-		$args['tsosi_plugin'] = rawurlencode( $plugin_file );
+		$args['tsosi_plugin'] = $plugin_file; // add_query_arg() encodes values itself.
 		$folder               = tsosi_get_plugin_folder_raw( $plugin_file );
 		if ( '' !== $folder ) {
 			$args['tsosi_prefix'] = sanitize_key( str_replace( '-', '_', $folder ) );
@@ -164,7 +164,7 @@ function tsosi_get_inspector_plugin_url( $plugin_file = '' ) {
 	return add_query_arg(
 		array(
 			'tab'         => 'plugin',
-			'plugin_file' => rawurlencode( $plugin_file ),
+			'plugin_file' => $plugin_file, // add_query_arg() encodes values itself.
 		),
 		$url
 	);

@@ -6,7 +6,7 @@ Tags: shortcode, block, maintenance, gutenberg, uninstall
 Requires at least: 6.1
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.0
+Stable tag: 1.0.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -48,7 +48,7 @@ Scan posts, pages, custom post types, reusable blocks, Site Editor templates, wi
 
 **How it works**
 
-The plugin reads your content and widget options locally. It does not send data to external services. Plugin signatures (shortcodes, blocks, meta prefixes) are discovered by scanning plugin PHP sources and cached for 24 hours. The site content index is stored under uploads and rebuilt when content or settings change.
+The plugin reads your content and widget options locally. It does not send data to external services. To see what visitors really get, a plugin scan also requests your own home page and latest posts from your own site (loopback requests, nothing leaves your server) and looks for files and markup of the scanned plugin in them. Plugin signatures (shortcodes, blocks, meta prefixes) are discovered by scanning plugin PHP sources and cached for 24 hours. The site content index is stored under uploads and rebuilt when content or settings change.
 
 **Multisite**
 
@@ -105,6 +105,57 @@ No data is transmitted to external servers. Scans run only when an administrator
 4. Scan settings — background scan, history size limit, and ignore list.
 
 == Changelog ==
+
+= 1.0.4 =
+* Replace refuses to edit content when the undo backup cannot be saved; backup and history file names are now harder to guess
+* Scan steps no longer process the same posts twice when two requests overlap (tab + background scan)
+* Fixed plugin deep links (preselected plugin on the Stack Inspector and Options Cleaner links) being double-encoded
+* Uninstall now also removes leftover lock files so the uploads folder is cleaned completely
+* Orphan finder no longer looks up the title of every indexed post (much faster on large sites)
+* Cancelling a scan no longer shows a false "No scan in progress" error; Replace preview/apply/undo and Cancel recover from network errors instead of freezing
+* Runtime block detection by editor script handle now matches by plugin slug instead of never matching
+* A plugin that is merely activated is no longer reported as "do not uninstall": only real usage (content, code calling it, tables with data, post types, etc.) blocks the verdict, and the message now says to deactivate, check the site and uninstall
+* Log options of other plugins (for example slow-query logs) are no longer reported as shortcode matches
+* WordPress/PHP constants (SAVEQUERIES, MB_CASE_*) are no longer reported as "other code calls this plugin"
+* Plugin scans now check the public site (home page and latest posts) for files and markup of the plugin, so plugins that add their output with filters and no shortcode (share buttons, cookie banners, SEO tags) are reported as in use
+* When a plugin is in use on the public site, the verdict lists the files and class names found and the page where each one was seen
+* Code of other plugins is no longer reported as "calling" this plugin when it only sits in bundled libraries (vendor folders), in the Free/Pro edition of the same plugin, inside quotes (name lists) or is a method with the same name
+* Sitemaps, robots.txt and feeds are checked too: a plugin that generates them (XML sitemap generators, SEO plugins) is reported as in use
+* A drop-in or mu-plugin that mentions a plugin (for example Query Monitor's own db.php) is now a review notice, not a "do not uninstall"; plugins hooking page output are only flagged when their output cannot be found on the public pages
+* "Clean leftovers in Options Cleaner" is no longer offered while the scanned plugin is still active
+* The verdict now shows only the reasons that matter (content, widgets, public output, real configuration); technical details such as hooks, AJAX or cron callbacks are no longer listed
+* Classic Editor is reported as in use when posts or the whole site are set to the classic editor, One User Avatar when users have avatars set with it, and UpdraftPlus / Options & Tables Cleaner warn when automatic backups or scheduled cleaning are active
+* The site's own domain no longer counts as proof that a plugin by the same author is in use
+* Custom post types registered by other plugins are no longer attributed to Stack Inspector
+* Plugins that hook into the output of public pages are flagged for review, and the verdict says when the public pages could not be read
+
+= 1.0.3 =
+* An active plugin is no longer reported as "likely safe to uninstall": new "in use" checks (hooks, cron, REST, post types, taxonomies, tables, dependencies, theme and other plugins) also used by the inactive audit and theme scan
+* Scans also cover custom fields, excerpts, term descriptions, non-autoloaded options, non-public post types and shortcodes/blocks hardcoded in theme templates; fewer false positives (widgets, core options)
+* Better signature discovery (constants, loops, page builders, JavaScript-only blocks, runtime widgets) and more reliable orphan detection
+* Compact header and cache strip, faster AJAX tab switching, CSV export opens correctly in Spanish/Catalan Excel, background scans chained as one-off cron events
+* Theme scan falls back to the active theme; shortcode/block risk wording is tag-scoped; Refresh signatures starts at once
+
+= 1.0.2 =
+* Support (Ko-fi) donation button in the admin header
+* New: Auto/Day/Night plugin visuals 
+* Scan, compare and replace buttons stay disabled until a plugin, shortcode, block or theme is chosen
+* History "View" now scrolls to the loaded results and reports errors
+* Built-in signatures for Elementor and Elementor Pro (elementor-template shortcode, _elementor_ meta)
+* Replace no longer strips backslashes from post content (block JSON, escaped quotes), also when undoing
+* Core blocks can be searched as core/paragraph or paragraph; blocks stored in page-builder JSON are detected
+* Orphan finder no longer flags shortcodes/blocks of active plugins that only register on the front end
+
+= 1.0.1 =
+* Faster first load: the admin screen opens immediately and prepares plugin signatures in the background with a progress notice
+* Plugin signature discovery walks each plugin folder once (skipping vendor/node_modules) and reads each file once
+* Single-file plugins are no longer profiled with the whole plugins folder
+* Site index checks no longer decode the cached index on every page load
+* Faster site index build (time-boxed steps with primed post caches) and faster cached scans/audits (posts are loaded only on a match)
+* Site index stores compact shortcode/block digests instead of full post content and page-builder meta (much smaller, faster to load and scan)
+* Obsolete site-index files are deleted when a new index is saved instead of piling up in uploads
+* Scans and the inactive-plugins audit wait for the background signature warm-up instead of building every profile inside one request
+* Inactive-plugins audit reads user/term/comment meta keys once instead of once per plugin
 
 = 1.0.0 =
 * First version

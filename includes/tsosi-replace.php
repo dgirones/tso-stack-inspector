@@ -59,9 +59,9 @@ function tsosi_replace_shortcode_in_content( $content, $from, $to ) {
 	$from_q = preg_quote( $from, '/' );
 	$to_q   = $to;
 
-	// Closing tags: [/from]
+	// Closing tags: [/from].
 	$content = preg_replace( '/\[\/' . $from_q . '\]/i', '[/' . $to_q . ']', $content );
-	// Opening / self-closing: [from ...] or [from]
+	// Opening / self-closing: [from ...] or [from].
 	$content = preg_replace( '/\[' . $from_q . '(\s|\]|\/)/i', '[' . $to_q . '$1', $content );
 
 	return is_string( $content ) ? $content : '';
@@ -84,8 +84,8 @@ function tsosi_replace_block_in_content( $content, $from, $to ) {
 
 	$from_q = preg_quote( $from, '/' );
 	// <!-- wp:old/name ... --> and <!-- /wp:old/name -->
-	$content = preg_replace( '/(<!--\s*\/?wp:)' . $from_q . '([\s{])/i', '$1' . $to . '$2', $content );
-	$content = preg_replace( '/(<!--\s*\/?wp:)' . $from_q . '(\s*\/?-->)/i', '$1' . $to . '$2', $content );
+	$content = preg_replace( '/(<!--\s*\/?wp:)' . $from_q . '([\s{])/i', '${1}' . $to . '${2}', $content );
+	$content = preg_replace( '/(<!--\s*\/?wp:)' . $from_q . '(\s*\/?-->)/i', '${1}' . $to . '${2}', $content );
 
 	return is_string( $content ) ? $content : '';
 }
@@ -241,12 +241,25 @@ function tsosi_replace_preview( $kind, $from, $to ) {
  * @param string $from     From.
  * @param string $to       To.
  * @param int[]  $post_ids IDs.
+ * @param string $backup_id Backup ID (optional).
  * @return array<string,mixed>|WP_Error
  */
 function tsosi_replace_apply( $kind, $from, $to, $post_ids, $backup_id = '' ) {
 	$preview = tsosi_replace_preview( $kind, $from, $to );
 	if ( is_wp_error( $preview ) ) {
 		return $preview;
+	}
+
+	// Never rewrite content when the undo backup cannot be stored afterwards.
+	if ( ! tsosi_scan_content_cache_storage_ready() ) {
+		return new WP_Error(
+			'tsosi_replace_no_backup',
+			tsosi_ui_triple_text(
+				'The uploads folder is not writable, so the undo backup cannot be saved. Nothing was changed.',
+				'La carpeta uploads no es escribible, así que no se puede guardar la copia para deshacer. No se ha cambiado nada.',
+				'La carpeta uploads no és escrivible, així que no es pot desar la còpia per desfer. No s\'ha canviat res.'
+			)
+		);
 	}
 
 	$allowed  = array_map( 'absint', (array) ( $preview['post_ids'] ?? array() ) );
@@ -279,7 +292,9 @@ function tsosi_replace_apply( $kind, $from, $to, $post_ids, $backup_id = '' ) {
 		$result                            = wp_update_post(
 			array(
 				'ID'           => $post_id,
-				'post_content' => $new,
+				// wp_update_post() unslashes its input: without wp_slash() every backslash in the
+				// content (block JSON attributes, escaped quotes, \\u003c...) would be stripped.
+				'post_content' => wp_slash( $new ),
 			),
 			true
 		);
@@ -324,6 +339,8 @@ function tsosi_replace_apply( $kind, $from, $to, $post_ids, $backup_id = '' ) {
 }
 
 /**
+ * Replace backup get index.
+ *
  * @return array<int,array<string,mixed>>
  */
 function tsosi_replace_backup_get_index() {
@@ -384,7 +401,7 @@ function tsosi_replace_backup_save( $payload ) {
 	if ( ! tsosi_scan_content_cache_storage_ready() || ! is_array( $payload ) || empty( $payload['posts'] ) ) {
 		return '';
 	}
-	$id       = gmdate( 'Ymd-His' ) . '-' . wp_generate_password( 6, false, false );
+	$id       = gmdate( 'Ymd-His' ) . '-' . wp_generate_password( 16, false, false );
 	$filename = 'replace-backup-' . tsosi_scan_cache_user_suffix() . '-' . sanitize_file_name( $id ) . '.json';
 	$path     = tsosi_scan_cache_file_path( $filename );
 	if ( '' === $path ) {
@@ -560,7 +577,7 @@ function tsosi_replace_backup_undo( $id ) {
 		$result = wp_update_post(
 			array(
 				'ID'           => $post_id,
-				'post_content' => $content,
+				'post_content' => wp_slash( $content ), // See tsosi_replace_apply(): wp_update_post() unslashes.
 			),
 			true
 		);

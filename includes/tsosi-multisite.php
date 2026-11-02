@@ -30,6 +30,8 @@ function tsosi_multisite_register_menu() {
 add_action( 'network_admin_menu', 'tsosi_multisite_register_menu' );
 
 /**
+ * Multisite render page.
+ *
  * @return void
  */
 function tsosi_multisite_render_page() {
@@ -38,8 +40,8 @@ function tsosi_multisite_render_page() {
 	}
 
 	$per_page = 100;
-	$paged    = isset( $_GET['tsosi_paged'] ) ? max( 1, absint( wp_unslash( $_GET['tsosi_paged'] ) ) ) : 1; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only pagination offset, no state change.
-	$search   = isset( $_GET['tsosi_site_search'] ) ? sanitize_text_field( wp_unslash( $_GET['tsosi_site_search'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only search filter, no state change.
+	$paged    = max( 1, absint( tsosi_get_admin_query_arg( 'tsosi_paged', '1' ) ) );
+	$search   = tsosi_get_admin_query_arg( 'tsosi_site_search' );
 
 	$query_args = array(
 		'number'  => $per_page,

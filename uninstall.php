@@ -24,6 +24,7 @@ function tsosi_uninstall_cleanup_site() {
 	delete_option( 'tso_stack_inspector_background_jobs' );
 	delete_transient( 'tso_stack_inspector_scan_job' );
 	delete_transient( 'tso_stack_inspector_plugin_profile' );
+	delete_transient( 'tso_stack_inspector_plugin_profile_part' );
 
 	global $wpdb;
 
@@ -71,7 +72,8 @@ function tsosi_uninstall_cleanup_site() {
 				glob( $tsosi_cache_dir . '/cache-*.json' ),
 				glob( $tsosi_cache_dir . '/history-*.json' ),
 				glob( $tsosi_cache_dir . '/replace-backup-*.json' ),
-			glob( $tsosi_cache_dir . '/job-lock-*.lock' ),
+				glob( $tsosi_cache_dir . '/job-lock-*.lock' ),
+				glob( $tsosi_cache_dir . '/lock-*.lock' ),
 				glob( $tsosi_cache_dir . '/index.html' ),
 				glob( $tsosi_cache_dir . '/index.php' ),
 				glob( $tsosi_cache_dir . '/.htaccess' ),

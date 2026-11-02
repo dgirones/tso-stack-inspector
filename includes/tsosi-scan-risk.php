@@ -19,18 +19,19 @@ function tsosi_scan_risk_content_match_types() {
 }
 
 /**
- * Whether a scan row is an active widget instance currently placed in a live sidebar
- * (tsosi_scan_active_widget_instances(), source_type 'widget') rather than a merely
- * leftover wp_options row. Uninstalling the plugin would visibly break the front end
- * right now, the same immediate, user-facing impact as a shortcode or block still left
- * in post content -- so this must not be scored as low-risk "leftover data" alongside an
- * inert option nobody references any more.
+ * Whether a scan row is an active widget instance currently placed in a live sidebar.
+ *
+ * Only rows built by tsosi_scan_active_widget_instances() set active_widget. A leftover
+ * widget_* option (source_type "widget", context "Widget option") is stored data: the
+ * option survives after the instance leaves every sidebar, and after the plugin is
+ * inactive. Counting that row as visible content made an unused widget_theme-my-login
+ * option look like "an active widget is still in use".
  *
  * @param array<string,mixed> $row Scan row.
  * @return bool
  */
 function tsosi_scan_risk_row_is_active_widget( $row ) {
-	return isset( $row['source_type'] ) && 'widget' === sanitize_key( (string) $row['source_type'] );
+	return ! empty( $row['active_widget'] );
 }
 
 /**
@@ -214,22 +215,47 @@ function tsosi_scan_assess_query_aware_risk( $results, $query ) {
 		);
 	}
 
-	if ( tsosi_scan_query_is_single_tag_scope( $query ) && 0 === $risk['total'] ) {
+	if ( tsosi_scan_query_is_single_tag_scope( $query ) ) {
+		if ( 0 === $risk['total'] ) {
+			return array(
+				'level'   => 'info',
+				'label'   => tsosi_ui_triple_text(
+					'This tag was not found — but this only checks this one tag',
+					'No se encontró esta etiqueta — pero esto solo comprueba esta etiqueta',
+					'No s\'ha trobat aquesta etiqueta — però això només comprova aquesta etiqueta'
+				),
+				'help'    => tsosi_ui_triple_text(
+					'This does not check the plugin\'s widgets, options, or database footprint. Use the "By plugin" tab for a full check before uninstalling.',
+					'Esto no comprueba los widgets, opciones ni huella en la base de datos del plugin. Usa la pestaña "Por plugin" para una comprobación completa antes de desinstalar.',
+					'Això no comprova els widgets, opcions ni empremta a la base de dades del plugin. Usa la pestanya "Per plugin" per a una comprovació completa abans de desinstal·lar.'
+				),
+				'total'   => 0,
+				'content' => 0,
+				'data'    => 0,
+			);
+		}
+
+		// Matches exist, but uninstall wording from tsosi_scan_assess_risk() is wrong here:
+		// this tab never checked the owning plugin's widgets/options/meta.
 		return array(
-			'level'   => 'info',
+			'level'   => $risk['content'] > 0 ? 'review' : 'info',
 			'label'   => tsosi_ui_triple_text(
-				'This tag was not found — but this only checks this one tag',
-				'No se encontró esta etiqueta — pero esto solo comprueba esta etiqueta',
-				'No s\'ha trobat aquesta etiqueta — però això només comprova aquesta etiqueta'
+				'This tag appears in scanned content',
+				'Esta etiqueta aparece en el contenido escaneado',
+				'Aquesta etiqueta apareix al contingut escanejat'
 			),
-			'help'    => tsosi_ui_triple_text(
-				'This does not check the plugin\'s widgets, options, or database footprint. Use the "By plugin" tab for a full check before uninstalling.',
-				'Esto no comprueba los widgets, opciones ni huella en la base de datos del plugin. Usa la pestaña "Por plugin" para una comprobación completa antes de desinstalar.',
-				'Això no comprova els widgets, opcions ni empremta a la base de dades del plugin. Usa la pestanya "Per plugin" per a una comprovació completa abans de desinstal·lar.'
+			'help'    => sprintf(
+				/* translators: %d: match count */
+				tsosi_ui_triple_text(
+					'%d match(es) for this tag only. Use the "By plugin" tab before uninstalling.',
+					'%d coincidencia(s) solo de esta etiqueta. Usa la pestaña "Por plugin" antes de desinstalar.',
+					'%d coincidència(es) només d\'aquesta etiqueta. Usa la pestanya "Per plugin" abans de desinstal·lar.'
+				),
+				(int) $risk['total']
 			),
-			'total'   => 0,
-			'content' => 0,
-			'data'    => 0,
+			'total'   => (int) $risk['total'],
+			'content' => (int) $risk['content'],
+			'data'    => (int) $risk['data'],
 		);
 	}
 
@@ -295,6 +321,7 @@ function tsosi_audit_inactive_plugins() {
 	$profiles = tsosi_get_all_plugin_profiles();
 	$rows     = array();
 	$count    = 0;
+	$batch    = array();
 
 	foreach ( $plugins as $file => $header ) {
 		if ( tsosi_is_plugin_active_file( $file ) ) {
@@ -304,7 +331,18 @@ function tsosi_audit_inactive_plugins() {
 		if ( $count > 60 ) {
 			break;
 		}
+		$batch[] = (string) $file;
+	}
 
+	// One pass over the code of the active theme, mu-plugins and active plugins for all
+	// inactive plugins at once (cheaper than one pass per plugin).
+	$targets = array();
+	foreach ( $batch as $file ) {
+		$targets[ $file ] = array( 'facts' => tsosi_usage_static_facts( $file ) );
+	}
+	$corpus = empty( $targets ) ? array() : tsosi_usage_scan_corpus( $targets, 8.0 );
+
+	foreach ( $batch as $file ) {
 		$profile = isset( $profiles[ $file ] ) && is_array( $profiles[ $file ] )
 			? $profiles[ $file ]
 			: tsosi_build_plugin_profile( $file );
@@ -336,6 +374,15 @@ function tsosi_audit_inactive_plugins() {
 			$match_count = (int) $risk['total'];
 		}
 
+		$usage = tsosi_usage_collect(
+			$file,
+			array(
+				'prefixes' => array_merge( (array) $needles['option_prefixes'], (array) $needles['meta_prefixes'] ),
+				'corpus'   => isset( $corpus[ $file ] ) ? $corpus[ $file ] : array(),
+			)
+		);
+		$risk  = tsosi_usage_apply_risk( $risk, $usage );
+
 		$rows[] = array(
 			'plugin_file'   => $file,
 			'name'          => $name,
@@ -343,8 +390,9 @@ function tsosi_audit_inactive_plugins() {
 			'content'       => (int) $risk['content'],
 			'data'          => (int) $risk['data'],
 			'risk_level'    => (string) $risk['level'],
-			'risk_label'    => (string) $risk['label'],
-			'needles_empty' => $empty,
+			'risk_label'    => (string) $risk['label'] . ( ! empty( $risk['reasons'] ) ? ' — ' . implode( '; ', array_slice( (array) $risk['reasons'], 0, 4 ) ) : '' ),
+			'reasons'       => isset( $risk['reasons'] ) ? array_values( (array) $risk['reasons'] ) : array(),
+			'needles_empty' => $empty && empty( $risk['reasons'] ),
 			'scan_url'      => add_query_arg(
 				array(
 					'page'        => 'tso-stack-inspector',

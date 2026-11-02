@@ -59,24 +59,24 @@ function tsosi_admin_handle_language_switch() {
 	if ( ! is_admin() || ! current_user_can( 'manage_options' ) ) {
 		return;
 	}
-	if ( ! isset( $_GET[ TSOSI_ADMIN_QUERY_SET_LANG ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Presence gate only; check_admin_referer runs before update_user_meta.
+	if ( ! tsosi_admin_query_arg_is_set( TSOSI_ADMIN_QUERY_SET_LANG ) ) {
 		return;
 	}
-	$page = isset( $_GET['page'] ) ? sanitize_text_field( wp_unslash( $_GET['page'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Presence gate only; check_admin_referer runs before update_user_meta.
+	$page = tsosi_get_admin_query_arg( 'page' );
 	if ( 'tso-stack-inspector' !== $page ) {
 		return;
 	}
 
 	tsosi_require_admin_form_nonce();
 
-	$lang = isset( $_GET[ TSOSI_ADMIN_QUERY_SET_LANG ] ) ? sanitize_key( wp_unslash( $_GET[ TSOSI_ADMIN_QUERY_SET_LANG ] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Nonce verified via check_admin_referer() above.
+	$lang = sanitize_key( tsosi_get_admin_query_arg( TSOSI_ADMIN_QUERY_SET_LANG ) ); // Nonce verified above.
 	if ( '' === $lang ) {
 		return;
 	}
 	tsosi_set_ui_lang( $lang );
 
 	$redirect_args = array( 'page' => 'tso-stack-inspector' );
-	$tab           = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Nonce verified via check_admin_referer() above; only used to keep the admin on the same tab.
+	$tab           = sanitize_key( tsosi_get_admin_query_arg( 'tab' ) ); // Only used to keep the admin on the same tab.
 	if ( '' !== $tab && in_array( $tab, tsosi_admin_tab_slugs(), true ) ) {
 		$redirect_args['tab'] = $tab;
 	}
@@ -106,8 +106,15 @@ function tsosi_admin_render_page() {
 
 	$base_url    = admin_url( 'tools.php?page=tso-stack-inspector' );
 	$plugins     = tsosi_get_installed_plugins();
-	$profiles    = tsosi_get_all_plugin_profiles();
 	$cleaner_cta = tsosi_get_options_cleaner_cta();
+
+	// Never analyse every installed plugin while rendering: on a cold cache that left the
+	// screen blank for seconds. Render right away and let admin.js warm the profiles.
+	$profiles      = tsosi_get_cached_plugin_profiles();
+	$profiles_cold = ( null === $profiles );
+	if ( $profiles_cold ) {
+		$profiles = array();
+	}
 
 	$txt_title = tsosi_ui_triple_text(
 		'TSO Stack Inspector',
@@ -120,7 +127,9 @@ function tsosi_admin_render_page() {
 		'Troba on s\'utilitzen shortcodes, blocs i metadades de plugins abans de desactivar o desinstal·lar.'
 	);
 
-	echo '<div class="wrap tsosi-wrap">';
+	echo '<div class="wrap tsosi-wrap" data-theme="day" data-theme-pref="auto">';
+	echo '<div class="tsosi-header">';
+	echo '<div class="tsosi-header-title">';
 	echo '<h1>' . esc_html( $txt_title );
 	$tsosi_plugin_version = tsosi_admin_assets_version();
 	if ( '' !== $tsosi_plugin_version ) {
@@ -128,39 +137,29 @@ function tsosi_admin_render_page() {
 	}
 	echo '</h1>';
 	echo '<p class="description">' . esc_html( $txt_intro ) . '</p>';
+	echo '</div>';
 
+	$txt_donate = tsosi_ui_triple_text(
+		'☕ Support this plugin',
+		'☕ Apoya este plugin',
+		'☕ Dona suport al plugin'
+	);
+	echo '<div class="tsosi-header-actions">';
 	tsosi_admin_render_language_switcher( $base_url, $tab );
+	tsosi_admin_render_theme_toggle();
+	echo '<a class="tsosi-donate-btn" href="' . esc_url( tsosi_get_kofi_donate_url() ) . '" target="_blank" rel="noopener noreferrer">' . esc_html( $txt_donate ) . '</a>';
+	echo '</div>';
+	echo '</div>';
 
-	if ( null !== $cleaner_cta ) {
-		echo '<p><a class="button button-secondary" href="' . esc_url( $cleaner_cta['url'] ) . '">' . esc_html( $cleaner_cta['label'] ) . '</a></p>';
+	tsosi_admin_render_cache_bar( $cleaner_cta );
+	if ( $profiles_cold ) {
+		tsosi_admin_render_profiles_notice( $tab );
 	}
-
-	tsosi_admin_render_cache_bar();
 	tsosi_admin_render_tabs( $base_url, $tab );
 
-	if ( 'plugin' === $tab ) {
-		tsosi_admin_render_plugin_tab( $plugins, $profiles, $preselect_plugin );
-	} elseif ( 'shortcode' === $tab ) {
-		tsosi_admin_render_shortcode_tab();
-	} elseif ( 'block' === $tab ) {
-		tsosi_admin_render_block_tab();
-	} elseif ( 'replace' === $tab ) {
-		tsosi_admin_render_replace_tab();
-	} elseif ( 'orphans' === $tab ) {
-		tsosi_admin_render_orphans_tab();
-	} elseif ( 'theme' === $tab ) {
-		tsosi_admin_render_theme_tab();
-	} elseif ( 'compare' === $tab ) {
-		tsosi_admin_render_compare_tab( $plugins );
-	} elseif ( 'inactive' === $tab ) {
-		tsosi_admin_render_inactive_tab( $plugins );
-	} elseif ( 'history' === $tab ) {
-		tsosi_admin_render_history_tab();
-	} elseif ( 'settings' === $tab ) {
-		tsosi_admin_render_settings_tab();
-	} else {
-		tsosi_admin_render_inventory_tab( $profiles );
-	}
+	echo '<div id="tsosi-tab-body" class="tsosi-tab-body">';
+	tsosi_admin_render_tab_body( $tab, $plugins, $profiles, $preselect_plugin );
+	echo '</div>';
 
 	echo '<div id="tsosi-scan-panel" class="tsosi-scan-panel" hidden>';
 	echo '<h2>' . esc_html( tsosi_ui_triple_text( 'Scan results', 'Resultados del escaneo', 'Resultats de l\'escaneig' ) ) . '</h2>';
@@ -174,7 +173,7 @@ function tsosi_admin_render_page() {
 	echo '<option value="widget">widget</option><option value="option">option</option><option value="menu">menu</option></select>';
 	echo '<select id="tsosi-filter-bucket" aria-label="' . esc_attr( tsosi_ui_triple_text( 'Content or data', 'Contenido o datos', 'Contingut o dades' ) ) . '">';
 	echo '<option value="">' . esc_html( tsosi_ui_triple_text( 'All matches', 'Todas las coincidencias', 'Totes les coincidències' ) ) . '</option>';
-	echo '<option value="content">' . esc_html( tsosi_ui_triple_text( 'Content only (shortcode/block)', 'Solo contenido (shortcode/bloque)', 'Només contingut (shortcode/bloc)' ) ) . '</option>';
+	echo '<option value="content">' . esc_html( tsosi_ui_triple_text( 'Content only (shortcode/block/active widget)', 'Solo contenido (shortcode/bloque/widget activo)', 'Només contingut (shortcode/bloc/widget actiu)' ) ) . '</option>';
 	echo '<option value="data">' . esc_html( tsosi_ui_triple_text( 'Data only (meta/options/…)', 'Solo datos (meta/opciones/…)', 'Només dades (meta/opcions/…)' ) ) . '</option>';
 	echo '</select>';
 	echo '<label class="tsosi-check-row tsosi-group-toggle"><input type="checkbox" id="tsosi-group-results" checked /> ';
@@ -223,6 +222,29 @@ function tsosi_admin_render_page() {
 }
 
 /**
+ * Notice shown while the plugin signatures cache is being built in the background
+ * (admin.js drives tsosi_profiles_warm_step() and then reloads or hides the notice).
+ *
+ * @param string $tab Active tab slug.
+ * @return void
+ */
+function tsosi_admin_render_profiles_notice( $tab ) {
+	$uses_profiles = in_array( $tab, array( 'plugin', 'shortcode', 'block', 'inventory' ), true );
+	echo '<div id="tsosi-profiles-notice" class="notice notice-info inline tsosi-profiles-notice" data-reload="' . ( $uses_profiles ? '1' : '0' ) . '">';
+	echo '<p id="tsosi-profiles-notice-text" aria-live="polite">';
+	echo esc_html(
+		tsosi_ui_triple_text(
+			'Preparing plugin signatures…',
+			'Preparando las firmas de plugins…',
+			'Preparant les signatures dels plugins…'
+		)
+	);
+	echo '</p></div>';
+}
+
+/**
+ * Admin render language switcher.
+ *
  * @param string $base_url Base admin URL.
  * @param string $tab      Active tab, preserved through the redirect after switching.
  * @return void
@@ -257,6 +279,31 @@ function tsosi_admin_render_language_switcher( $base_url, $tab = '' ) {
 }
 
 /**
+ * Day / night / auto appearance toggle (cycles on click; state kept in the browser by admin.js).
+ *
+ * @return void
+ */
+function tsosi_admin_render_theme_toggle() {
+	// All three states are printed; CSS shows the one matching <html data-tsosi-theme-pref>,
+	// which the boot script sets in <head>. The label is therefore right on first paint.
+	$states = array(
+		'auto'  => array( '🌓', tsosi_ui_triple_text( 'Auto mode', 'Modo auto', 'Mode auto' ) ),
+		'day'   => array( '☀️', tsosi_ui_triple_text( 'Day mode', 'Modo día', 'Mode dia' ) ),
+		'night' => array( '🌙', tsosi_ui_triple_text( 'Night mode', 'Modo noche', 'Mode nit' ) ),
+	);
+	echo '<button type="button" id="tsosi-theme-toggle" class="tsosi-theme-btn" aria-pressed="mixed" title="' . esc_attr( $states['auto'][1] ) . '">';
+	foreach ( $states as $pref => $data ) {
+		echo '<span class="tsosi-theme-state" data-pref="' . esc_attr( $pref ) . '">';
+		echo '<span class="tsosi-theme-icon" aria-hidden="true">' . esc_html( $data[0] ) . '</span>';
+		echo '<span class="tsosi-theme-label">' . esc_html( $data[1] ) . '</span>';
+		echo '</span>';
+	}
+	echo '</button>';
+}
+
+/**
+ * Admin render tabs.
+ *
  * @param string $base_url Base URL.
  * @param string $tab      Active tab.
  * @return void
@@ -279,12 +326,14 @@ function tsosi_admin_render_tabs( $base_url, $tab ) {
 	foreach ( $tabs as $slug => $label ) {
 		$url   = add_query_arg( 'tab', $slug, $base_url );
 		$class = ( $tab === $slug ) ? ' nav-tab nav-tab-active' : ' nav-tab';
-		echo '<a class="' . esc_attr( trim( $class ) ) . '" href="' . esc_url( $url ) . '">' . esc_html( $label ) . '</a>';
+		echo '<a class="' . esc_attr( trim( $class ) ) . '" data-tab="' . esc_attr( $slug ) . '" href="' . esc_url( $url ) . '">' . esc_html( $label ) . '</a>';
 	}
 	echo '</nav>';
 }
 
 /**
+ * Admin render plugin tab.
+ *
  * @param array<string,array<string,string>> $plugins  Plugins.
  * @param array<string,array<string,mixed>>  $profiles Profiles.
  * @param string                             $preselect Optional plugin file to preselect.
@@ -344,10 +393,13 @@ function tsosi_admin_render_plugin_tab( $plugins, $profiles, $preselect = '' ) {
 }
 
 /**
+ * Admin render shortcode tab.
+ *
  * @return void
  */
 function tsosi_admin_render_shortcode_tab() {
-	$shortcode_inventory = tsosi_get_shortcode_inventory();
+	$cached_profiles     = tsosi_get_cached_plugin_profiles();
+	$shortcode_inventory = tsosi_get_shortcode_inventory( null === $cached_profiles ? array() : $cached_profiles );
 	$registered_tags     = isset( $shortcode_inventory['registered_tags'] ) ? (array) $shortcode_inventory['registered_tags'] : array();
 	$plugin_code_tags    = isset( $shortcode_inventory['plugin_code_tags'] ) ? (array) $shortcode_inventory['plugin_code_tags'] : array();
 	$all_tags            = isset( $shortcode_inventory['all_tags'] ) ? (array) $shortcode_inventory['all_tags'] : array();
@@ -416,10 +468,13 @@ function tsosi_admin_render_shortcode_tab() {
 }
 
 /**
+ * Admin render block tab.
+ *
  * @return void
  */
 function tsosi_admin_render_block_tab() {
-	$block_inventory = tsosi_get_block_inventory();
+	$cached_profiles = tsosi_get_cached_plugin_profiles();
+	$block_inventory = tsosi_get_block_inventory( null === $cached_profiles ? array() : $cached_profiles );
 	$plugin_blocks   = isset( $block_inventory['plugin_blocks'] ) ? (array) $block_inventory['plugin_blocks'] : array();
 	$all_blocks      = isset( $block_inventory['registered_blocks'] ) ? (array) $block_inventory['registered_blocks'] : array();
 	$other_blocks    = array_values( array_diff( $all_blocks, $plugin_blocks ) );
@@ -488,6 +543,8 @@ function tsosi_admin_render_block_tab() {
 }
 
 /**
+ * Admin render inventory tab.
+ *
  * @param array<string,array<string,mixed>> $profiles Profiles.
  * @return void
  */
@@ -511,6 +568,11 @@ function tsosi_admin_render_inventory_tab( $profiles ) {
 	echo '<h2>' . esc_html( tsosi_ui_triple_text( 'Plugin signatures', 'Firmas de plugins', 'Signatures de plugins' ) ) . '</h2>';
 	tsosi_admin_echo_help( tsosi_admin_signatures_help_text() );
 	echo '<p><button type="button" class="button tsosi-refresh-profiles" id="tsosi-refresh-profiles-inventory">' . esc_html( tsosi_ui_triple_text( 'Refresh signatures', 'Actualizar firmas', 'Actualitzar signatures' ) ) . '</button></p>';
+	if ( empty( $profiles ) ) {
+		// Cache still warming (see tsosi_admin_render_profiles_notice()).
+		echo '</div>';
+		return;
+	}
 	echo '<table class="widefat striped"><thead><tr>';
 	echo '<th>' . esc_html( tsosi_ui_triple_text( 'Plugin', 'Plugin', 'Plugin' ) ) . '</th>';
 	echo '<th>' . esc_html( tsosi_ui_triple_text( 'Status', 'Estado', 'Estat' ) ) . '</th>';
@@ -559,7 +621,12 @@ function tsosi_ajax_scan_start() {
 			wp_send_json_error( array( 'message' => __( 'Enter a block name.', 'tso-stack-inspector' ) ) );
 		}
 	} elseif ( 'theme' === $mode ) {
-		$query['theme'] = tsosi_sanitize_theme_stylesheet( tsosi_get_ajax_post_text( 'theme', wp_get_theme()->get_stylesheet() ) );
+		// Empty string in POST must not block the active-theme fallback: a present POST key
+		// is true for theme=, so tsosi_get_ajax_post_text() would skip its default.
+		$theme_raw      = tsosi_get_ajax_post_text( 'theme' );
+		$query['theme'] = tsosi_sanitize_theme_stylesheet(
+			'' !== $theme_raw ? $theme_raw : wp_get_theme()->get_stylesheet()
+		);
 		if ( '' === $query['theme'] ) {
 			wp_send_json_error( array( 'message' => __( 'Select a valid theme.', 'tso-stack-inspector' ) ) );
 		}
@@ -603,18 +670,24 @@ function tsosi_ajax_scan_step() {
 add_action( 'wp_ajax_tsosi_scan_step', 'tsosi_ajax_scan_step' );
 
 /**
- * AJAX: refresh plugin profile cache.
+ * AJAX: drop the plugin profile cache. The screen reloads afterwards and rebuilds it
+ * in the background (see tsosi_ajax_profiles_warm()) instead of blocking this request.
  *
  * @return void
  */
 function tsosi_ajax_refresh_profiles() {
 	tsosi_ajax_require_manage_options();
 	tsosi_flush_plugin_profile_cache();
-	$profiles = tsosi_get_all_plugin_profiles( true );
+	// Start a time-boxed rebuild immediately so Refresh never reports a fake "0"
+	// while the UI continues warming via tsosi_profiles_warm until done.
+	$step = tsosi_profiles_warm_step( 3.0 );
 	wp_send_json_success(
 		array(
-			'count'   => count( $profiles ),
-			'message' => tsosi_ui_triple_text(
+			'count'    => isset( $step['processed'] ) ? (int) $step['processed'] : 0,
+			'done'     => ! empty( $step['done'] ),
+			'progress' => isset( $step['progress'] ) ? (int) $step['progress'] : 0,
+			'total'    => isset( $step['total'] ) ? (int) $step['total'] : 0,
+			'message'  => tsosi_ui_triple_text(
 				'Plugin signatures refreshed.',
 				'Firmas de plugins actualizadas.',
 				'Signatures de plugins actualitzades.'
@@ -623,3 +696,14 @@ function tsosi_ajax_refresh_profiles() {
 	);
 }
 add_action( 'wp_ajax_tsosi_refresh_profiles', 'tsosi_ajax_refresh_profiles' );
+
+/**
+ * AJAX: build part of the plugin profile cache (time-boxed; call until done).
+ *
+ * @return void
+ */
+function tsosi_ajax_profiles_warm() {
+	tsosi_ajax_require_manage_options();
+	wp_send_json_success( tsosi_profiles_warm_step() );
+}
+add_action( 'wp_ajax_tsosi_profiles_warm', 'tsosi_ajax_profiles_warm' );
