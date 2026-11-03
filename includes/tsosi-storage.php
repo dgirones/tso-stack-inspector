@@ -49,6 +49,11 @@ if ( ! defined( 'TSOSI_TRANSIENT_PLUGIN_PROFILE_PARTIAL' ) ) {
 	define( 'TSOSI_TRANSIENT_PLUGIN_PROFILE_PARTIAL', 'tso_stack_inspector_plugin_profile_part' );
 }
 
+// Public pages that answered 404/410 when sampled (skipped for a while so scans do not keep hitting them).
+if ( ! defined( 'TSOSI_TRANSIENT_FRONT_MISSING' ) ) {
+	define( 'TSOSI_TRANSIENT_FRONT_MISSING', 'tso_stack_inspector_front_missing' );
+}
+
 if ( ! defined( 'TSOSI_USER_META_UI_LANG' ) ) {
 	define( 'TSOSI_USER_META_UI_LANG', 'tso_stack_inspector_ui_lang' );
 }
@@ -588,4 +593,102 @@ function tsosi_protect_uploads_dir( $path ) {
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- IIS deny rules for private uploads.
 		file_put_contents( $web_config, $iis );
 	}
+}
+
+/**
+ * Public URLs that answered 404/410 when sampled recently.
+ *
+ * @return string[]
+ */
+function tsosi_front_missing_get() {
+	$known = get_transient( TSOSI_TRANSIENT_FRONT_MISSING );
+	return is_array( $known ) ? array_map( 'strval', array_keys( $known ) ) : array();
+}
+
+/**
+ * Remember public URLs that answered 404/410, for a week (at most 50, oldest dropped).
+ *
+ * @param string[] $urls Absolute URLs.
+ * @return void
+ */
+function tsosi_front_missing_add( $urls ) {
+	$urls = array_filter( array_map( 'strval', (array) $urls ) );
+	if ( empty( $urls ) ) {
+		return;
+	}
+	$known = get_transient( TSOSI_TRANSIENT_FRONT_MISSING );
+	$known = is_array( $known ) ? $known : array();
+	foreach ( $urls as $url ) {
+		$known[ $url ] = time();
+	}
+	if ( count( $known ) > 50 ) {
+		asort( $known );
+		$known = array_slice( $known, -50, null, true );
+	}
+	set_transient( TSOSI_TRANSIENT_FRONT_MISSING, $known, WEEK_IN_SECONDS );
+}
+
+/**
+ * File that holds the last read of the public pages (compressed JSON, never executable).
+ *
+ * @return string Absolute path, '' when the uploads folder is unavailable.
+ */
+function tsosi_front_cache_path() {
+	$dir = tsosi_get_uploads_dir();
+	if ( ! empty( $dir['error'] ) || '' === $dir['path'] ) {
+		return '';
+	}
+	return trailingslashit( $dir['path'] ) . 'front-snapshot.json.gz';
+}
+
+/**
+ * Read the cached public pages when they were saved for the same fingerprint, recently enough.
+ *
+ * @param string $key Fingerprint of the site state and of the pages read.
+ * @param int    $ttl Seconds the cache stays valid.
+ * @return array<string,mixed>|null
+ */
+function tsosi_front_cache_read( $key, $ttl ) {
+	$path = tsosi_front_cache_path();
+	if ( '' === $path || ! is_file( $path ) || ! function_exists( 'gzdecode' ) ) {
+		return null;
+	}
+	// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- local compressed JSON cache in plugin uploads.
+	$raw  = file_get_contents( $path );
+	$json = is_string( $raw ) ? gzdecode( $raw ) : false;
+	$box  = is_string( $json ) ? json_decode( $json, true ) : null;
+	if ( ! is_array( $box ) || ! isset( $box['key'], $box['time'], $box['data'] ) || ! is_array( $box['data'] ) ) {
+		return null;
+	}
+	if ( (string) $box['key'] !== (string) $key || ( time() - (int) $box['time'] ) > (int) $ttl ) {
+		return null;
+	}
+	return $box['data'];
+}
+
+/**
+ * Save the public pages that were just read.
+ *
+ * @param string              $key  Fingerprint.
+ * @param array<string,mixed> $data Read result.
+ * @return bool
+ */
+function tsosi_front_cache_write( $key, $data ) {
+	$path = tsosi_front_cache_path();
+	if ( '' === $path || ! function_exists( 'gzencode' ) ) {
+		return false;
+	}
+	$json = wp_json_encode(
+		array(
+			'key'  => (string) $key,
+			'time' => time(),
+			'data' => $data,
+		)
+	);
+	$gz   = is_string( $json ) ? gzencode( $json, 6 ) : false;
+	if ( ! is_string( $gz ) ) {
+		return false;
+	}
+	// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- non-executable compressed JSON cache in plugin uploads.
+	return false !== file_put_contents( $path, $gz, LOCK_EX );
 }

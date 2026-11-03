@@ -10,10 +10,29 @@
  */
 
 define( 'ABSPATH', __DIR__ . '/' );
+
+// One uploads folder for the whole run (the plugin memoizes its location), removed at exit.
+define( 'TSOSI_TEST_UPLOADS', sys_get_temp_dir() . '/tsosi-test-' . uniqid() );
+mkdir( TSOSI_TEST_UPLOADS ); // phpcs:ignore
+register_shutdown_function(
+	static function () {
+		foreach ( array( TSOSI_TEST_UPLOADS . '/tso-stack-inspector', TSOSI_TEST_UPLOADS ) as $dir ) {
+			foreach ( (array) glob( $dir . '/{,.}*', GLOB_BRACE ) as $file ) {
+				if ( is_file( $file ) ) {
+					unlink( $file ); // phpcs:ignore
+				}
+			}
+			if ( is_dir( $dir ) ) {
+				rmdir( $dir ); // phpcs:ignore
+			}
+		}
+	}
+);
 define( 'TSOSI_PATH', dirname( __DIR__ ) . '/' );
 define( 'TSOSI_VERSION', 'test' );
 define( 'TSOSI_USER_META_UI_LANG', 'tsosi_ui_lang' );
 define( 'DAY_IN_SECONDS', 86400 );
+define( 'WEEK_IN_SECONDS', 604800 );
 define( 'ARRAY_A', 'ARRAY_A' );
 
 $GLOBALS['tsosi_test'] = array();
@@ -25,11 +44,12 @@ $GLOBALS['tsosi_test'] = array();
  */
 function tsosi_test_reset() {
 	$GLOBALS['tsosi_test']                = array(
-		'options'   => array(),
-		'http'      => array(),
-		'types'     => array(),
-		'requested' => array(),
-		'plugins'   => array(),
+		'options'    => array(),
+		'http'       => array(),
+		'types'      => array(),
+		'requested'  => array(),
+		'plugins'    => array(),
+		'transients' => array(),
 	);
 	$GLOBALS['wp_registered_sidebars']    = array();
 	$GLOBALS['wpdb']                      = new Tsosi_Test_Wpdb();
@@ -131,7 +151,7 @@ function get_post_type_object( $type ) {
 	return isset( $GLOBALS['tsosi_test']['types'][ $type ] ) ? (object) $GLOBALS['tsosi_test']['types'][ $type ] : null;
 }
 function get_post_types() {
-	return array( 'post', 'page' );
+	return isset( $GLOBALS['tsosi_test']['custom_types'] ) ? $GLOBALS['tsosi_test']['custom_types'] : array();
 }
 function get_taxonomies() {
 	return array( 'category' );
@@ -150,6 +170,41 @@ function get_permalink( $id ) {
 function get_post_type_archive_link() {
 	return false;
 }
+function get_site_option( $name, $default_value = false ) {
+	return get_option( $name, $default_value );
+}
+function get_stylesheet() {
+	return 'test-theme';
+}
+function wp_json_encode( $data ) {
+	return json_encode( $data ); // phpcs:ignore
+}
+function get_transient( $key ) {
+	return array_key_exists( $key, $GLOBALS['tsosi_test']['transients'] ) ? $GLOBALS['tsosi_test']['transients'][ $key ] : false;
+}
+function set_transient( $key, $value ) {
+	$GLOBALS['tsosi_test']['transients'][ $key ] = $value;
+	return true;
+}
+function trailingslashit( $path ) {
+	return rtrim( (string) $path, '/\\' ) . '/';
+}
+function untrailingslashit( $path ) {
+	return rtrim( (string) $path, '/\\' );
+}
+function wp_upload_dir() {
+	return array(
+		'error'   => false,
+		'basedir' => TSOSI_TEST_UPLOADS,
+		'baseurl' => 'https://x.test/uploads',
+	);
+}
+function wp_mkdir_p( $dir ) {
+	return is_dir( $dir ) || mkdir( $dir, 0777, true ); // phpcs:ignore
+}
+function wp_delete_file( $file ) {
+	unlink( $file ); // phpcs:ignore
+}
 function get_plugins() {
 	return $GLOBALS['tsosi_test']['plugins'];
 }
@@ -165,6 +220,7 @@ function wp_remote_retrieve_body( $response ) {
 	return $response['body'];
 }
 
+require_once __DIR__ . '/../includes/tsosi-storage.php';
 require_once __DIR__ . '/../includes/tsosi-i18n.php';
 require_once __DIR__ . '/../includes/tsosi-plugin-profile.php';
 require_once __DIR__ . '/../includes/tsosi-plugin-usage.php';
