@@ -15,7 +15,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * @return string
  */
 function tsosi_admin_assets_version() {
-	return defined( 'TSOSI_VERSION' ) ? TSOSI_VERSION : '1.0.4';
+	return defined( 'TSOSI_VERSION' ) ? TSOSI_VERSION : '1.0.5';
 }
 
 /**

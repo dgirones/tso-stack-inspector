@@ -6,7 +6,7 @@ Tags: shortcode, block, maintenance, gutenberg, uninstall
 Requires at least: 6.1
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.4
+Stable tag: 1.0.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -108,13 +108,20 @@ No data is transmitted to external servers: the only requests the plugin makes g
 
 == Changelog ==
 
+= 1.0.5 =
+* The verdict is graded: a priority (low/medium/high) and a confidence level (high/medium/low) with the reason, and indirect hints are labelled so they are not mistaken for proof; the inactive-plugins audit in WP-CLI also shows the confidence
+* The public site check reads a wider sample of your pages (home, latest posts and page, shop pages, one entry and archive per content type, one page per custom template) and only treats silence as "not used" when every page that exists was read
+* Scans no longer fill your 404 log: pages that answer 404 are skipped for a week, robots.txt, sitemaps and feed are read only for sitemap, SEO and feed plugins, and the pages read are reused for two minutes while nothing changed
+* New: widgets left in the inactive area, and old non-public post types with their volume and last edit date, are reported
+* The readme now describes exactly which requests the plugin makes (only to your own site) and which data it stores
+
 = 1.0.4 =
-* Replace refuses to edit content when the undo backup cannot be saved, and backup/history file names are harder to guess; Replace and Cancel now recover from network errors instead of freezing
+* Replace refuses to edit content when the undo backup cannot be saved, and backup/history file names are harder to guess; Replace and Cancel recover from network errors instead of freezing
 * Faster, more reliable scans: no posts processed twice when two requests overlap, much faster orphan finder, fixed double-encoded plugin links, and uninstall also removes leftover lock files
-* A merely activated plugin is no longer reported as "do not uninstall": only real usage (content, widgets, code calling it, tables with data, post types, scheduled tasks, dependencies, public output) blocks the verdict
-* The public site check now reads a sample of pages (home, latest posts and page, shop pages, one entry and archive per content type, one page per template), reuses it for two minutes, skips pages that answer 404, and only reads robots.txt, sitemaps and feed for sitemap, SEO and feed plugins; the verdict lists the files and class names found and where
-* New: the verdict is graded with a priority (low/medium/high) and a confidence level (high/medium/low) with the reason, indirect hints are labelled, and widgets left in the inactive area and old non-public post types are reported with their volume and last edit date
-* Fewer false positives (log options and constants of other plugins, bundled libraries, Free/Pro editions, drop-ins, mu-plugins, the site's own domain) and new checks for Classic Editor, One User Avatar, UpdraftPlus and Options & Tables Cleaner
+* A merely activated plugin is no longer reported as "do not uninstall": only real usage (content, widgets, code calling it, tables with data, post types, scheduled tasks, dependencies, public output) blocks the verdict, and the verdict shows only the reasons that matter
+* Plugin scans check your own public pages, sitemaps, robots.txt and feeds for files and markup of the plugin, and list what was found and where
+* Fewer false positives (log options and constants of other plugins, bundled libraries, Free/Pro editions, drop-ins, mu-plugins, the site's own domain, post types of other plugins)
+* New checks for Classic Editor, One User Avatar, UpdraftPlus and Options & Tables Cleaner
 
 = 1.0.3 =
 * An active plugin is no longer reported as "likely safe to uninstall": new "in use" checks (hooks, cron, REST, post types, taxonomies, tables, dependencies, theme and other plugins) also used by the inactive audit and theme scan
