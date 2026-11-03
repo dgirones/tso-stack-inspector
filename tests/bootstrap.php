@@ -25,9 +25,11 @@ $GLOBALS['tsosi_test'] = array();
  */
 function tsosi_test_reset() {
 	$GLOBALS['tsosi_test']                = array(
-		'options' => array(),
-		'http'    => array(),
-		'types'   => array(),
+		'options'   => array(),
+		'http'      => array(),
+		'types'     => array(),
+		'requested' => array(),
+		'plugins'   => array(),
 	);
 	$GLOBALS['wp_registered_sidebars']    = array();
 	$GLOBALS['wpdb']                      = new Tsosi_Test_Wpdb();
@@ -148,7 +150,11 @@ function get_permalink( $id ) {
 function get_post_type_archive_link() {
 	return false;
 }
+function get_plugins() {
+	return $GLOBALS['tsosi_test']['plugins'];
+}
 function wp_remote_get( $url ) {
+	$GLOBALS['tsosi_test']['requested'][] = $url;
 	$http = $GLOBALS['tsosi_test']['http'];
 	return isset( $http[ $url ] ) ? $http[ $url ] : new WP_Error();
 }
@@ -160,6 +166,7 @@ function wp_remote_retrieve_body( $response ) {
 }
 
 require_once __DIR__ . '/../includes/tsosi-i18n.php';
+require_once __DIR__ . '/../includes/tsosi-plugin-profile.php';
 require_once __DIR__ . '/../includes/tsosi-plugin-usage.php';
 require_once __DIR__ . '/../includes/tsosi-scanner.php';
 
