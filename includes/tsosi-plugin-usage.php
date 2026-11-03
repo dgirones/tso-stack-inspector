@@ -40,6 +40,11 @@ if ( ! defined( 'TSOSI_USAGE_FRONTEND_TIME_BUDGET' ) ) {
 	define( 'TSOSI_USAGE_FRONTEND_TIME_BUDGET', 15.0 );
 }
 
+// Seconds the read of the public pages is reused (same site state, same pages) by the next scan.
+if ( ! defined( 'TSOSI_USAGE_FRONTEND_CACHE_TTL' ) ) {
+	define( 'TSOSI_USAGE_FRONTEND_CACHE_TTL', 120 );
+}
+
 // A non-public content type untouched for this many days is "dormant" (stored data, not live content).
 if ( ! defined( 'TSOSI_USAGE_STALE_DAYS' ) ) {
 	define( 'TSOSI_USAGE_STALE_DAYS', 730 );
@@ -936,18 +941,23 @@ function tsosi_usage_frontend_candidates() {
 		'templates' => array(),
 	);
 
+	// Pages that answered 404/410 on a recent scan are left out, so they are not requested (and
+	// logged as a 404 by the site) every time.
+	$missing = tsosi_front_missing_get();
+
 	// The 2 latest posts and the latest page, asked separately: when pages are newer than the
 	// posts, one mixed "latest 2" query would leave every blog post out of the sample.
 	foreach ( array(
 		'post' => 2,
 		'page' => 1,
 	) as $type => $limit ) {
-		$ids = get_posts(
+		$found = array();
+		$ids   = get_posts(
 			array(
 				'post_type'              => $type,
 				'post_status'            => 'publish',
 				'has_password'           => false,
-				'posts_per_page'         => $limit,
+				'posts_per_page'         => $limit + 2,
 				'orderby'                => 'date',
 				'order'                  => 'DESC',
 				'fields'                 => 'ids',
@@ -959,8 +969,11 @@ function tsosi_usage_frontend_candidates() {
 		foreach ( (array) $ids as $post_id ) {
 			$link = get_permalink( (int) $post_id );
 			if ( is_string( $link ) && '' !== $link ) {
-				$groups['latest'][] = $link;
+				$found[] = $link;
 			}
+		}
+		foreach ( array_slice( tsosi_usage_drop_urls( $found, $missing ), 0, $limit ) as $link ) {
+			$groups['latest'][] = $link;
 		}
 	}
 
@@ -1023,7 +1036,29 @@ function tsosi_usage_frontend_candidates() {
 		}
 	}
 
+	foreach ( $groups as $name => $urls ) {
+		$groups[ $name ] = tsosi_usage_drop_urls( $urls, $missing );
+	}
 	return $groups;
+}
+
+/**
+ * Remove from a URL list the ones that should not be requested. The home page is never removed.
+ *
+ * @param string[] $urls Absolute URLs.
+ * @param string[] $drop URLs to remove.
+ * @return string[]
+ */
+function tsosi_usage_drop_urls( $urls, $drop ) {
+	$home = home_url( '/' );
+	return array_values(
+		array_filter(
+			(array) $urls,
+			static function ( $url ) use ( $drop, $home ) {
+				return $url === $home || ! in_array( $url, (array) $drop, true );
+			}
+		)
+	);
 }
 
 /**
@@ -1048,16 +1083,17 @@ function tsosi_usage_frontend_urls() {
  *
  * @param string[] $urls   Pages to read (the first one is always attempted).
  * @param float    $budget Seconds allowed for the whole batch.
- * @return array{html:array<string,string>,failed:int,missing:int,planned:int,skipped:int,complete:bool}
+ * @return array{html:array<string,string>,failed:int,missing:int,missing_urls:string[],planned:int,skipped:int,complete:bool}
  */
 function tsosi_usage_frontend_read( $urls, $budget ) {
 	$out     = array(
-		'html'     => array(),
-		'failed'   => 0,
-		'missing'  => 0,
-		'planned'  => count( (array) $urls ),
-		'skipped'  => 0,
-		'complete' => false,
+		'html'         => array(),
+		'failed'       => 0,
+		'missing'      => 0,
+		'missing_urls' => array(),
+		'planned'      => count( (array) $urls ),
+		'skipped'      => 0,
+		'complete'     => false,
 	);
 	$started = microtime( true );
 	foreach ( array_values( (array) $urls ) as $i => $url ) {
@@ -1083,6 +1119,7 @@ function tsosi_usage_frontend_read( $urls, $budget ) {
 		// visitor reads: it neither proves nor hides anything, so it does not make the read incomplete.
 		if ( 404 === $code || 410 === $code ) {
 			++$out['missing'];
+			$out['missing_urls'][] = (string) $url;
 			continue;
 		}
 		if ( 200 !== $code ) {
@@ -1103,15 +1140,66 @@ function tsosi_usage_frontend_read( $urls, $budget ) {
 }
 
 /**
- * HTML of a sample of the public pages as a visitor receives it (requests to this same
- * site only, nothing is sent to third parties). Read once per request.
+ * Fingerprint of what decides the HTML visitors get: the pages read, active plugins and
+ * theme, widget placement, theme settings and the latest content edit. A scan right after
+ * any of those changes never reuses a previous read.
  *
- * @return array{html:array<string,string>,failed:int,planned:int,skipped:int,complete:bool}
+ * @param string[] $urls Pages that will be read.
+ * @return string
+ */
+function tsosi_usage_frontend_fingerprint( $urls ) {
+	global $wpdb;
+	$stylesheet = (string) get_stylesheet();
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- one cheap aggregate to detect content edits.
+	$last_edit = (string) $wpdb->get_var( "SELECT MAX(post_modified_gmt) FROM {$wpdb->posts} WHERE post_status = 'publish'" );
+	$state     = array(
+		(array) $urls,
+		get_option( 'active_plugins', array() ),
+		get_site_option( 'active_sitewide_plugins', array() ),
+		$stylesheet,
+		get_option( 'sidebars_widgets', array() ),
+		get_option( 'theme_mods_' . $stylesheet, array() ),
+		$last_edit,
+		TSOSI_VERSION,
+	);
+	return md5( (string) wp_json_encode( $state ) );
+}
+
+/**
+ * Read the pages to sample, or reuse the last complete read when nothing changed.
+ *
+ * @return array{html:array<string,string>,failed:int,missing:int,missing_urls:string[],planned:int,skipped:int,complete:bool}
+ */
+function tsosi_usage_frontend_load() {
+	$urls = tsosi_usage_frontend_urls();
+	$key  = tsosi_usage_frontend_fingerprint( $urls );
+
+	$cached = tsosi_front_cache_read( $key, TSOSI_USAGE_FRONTEND_CACHE_TTL );
+	if ( is_array( $cached ) && isset( $cached['html'], $cached['complete'] ) ) {
+		return $cached;
+	}
+
+	$read = tsosi_usage_frontend_read( $urls, TSOSI_USAGE_FRONTEND_TIME_BUDGET );
+	tsosi_front_missing_add( array_diff( $read['missing_urls'], array( home_url( '/' ) ) ) );
+	// Only a complete read is worth reusing; a partial one must be retried.
+	if ( $read['complete'] ) {
+		tsosi_front_cache_write( $key, $read );
+	}
+	return $read;
+}
+
+/**
+ * HTML of a sample of the public pages as a visitor receives it (requests to this same
+ * site only, nothing is sent to third parties). Read once per request, and reused for a
+ * couple of minutes by the next scan while nothing that changes the pages has changed, so
+ * scanning several plugins in a row does not request the same pages again and again.
+ *
+ * @return array{html:array<string,string>,failed:int,missing:int,missing_urls:string[],planned:int,skipped:int,complete:bool}
  */
 function tsosi_usage_frontend_snapshot() {
 	static $memo = null;
 	if ( null === $memo ) {
-		$memo = tsosi_usage_frontend_read( tsosi_usage_frontend_urls(), TSOSI_USAGE_FRONTEND_TIME_BUDGET );
+		$memo = tsosi_usage_frontend_load();
 	}
 	return $memo;
 }

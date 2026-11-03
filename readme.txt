@@ -48,7 +48,7 @@ Scan posts, pages, custom post types, reusable blocks, Site Editor templates, wi
 
 **How it works**
 
-The plugin reads your content and widget options locally. It does not send data to external services. To see what visitors really get, a plugin scan also requests your own home page and latest posts from your own site (loopback requests, nothing leaves your server) and looks for files and markup of the scanned plugin in them. Plugin signatures (shortcodes, blocks, meta prefixes) are discovered by scanning plugin PHP sources and cached for 24 hours. The site content index is stored under uploads and rebuilt when content or settings change.
+The plugin reads your content and widget options locally. It does not send data to external services. To see what visitors really get, a plugin scan also requests a sample of pages from your own site (loopback requests, nothing leaves your server): your home page, the latest posts and page, shop pages, one entry and archive of each public content type and one page per custom template, up to 12 in all. It looks for files and markup of the scanned plugin in them. For sitemap, SEO and feed plugins it also reads robots.txt, the sitemaps it declares and your feed. The pages read are reused for two minutes while nothing that changes them has changed, and a page that answered 404 is skipped for a week, so scans do not fill your 404 log. Plugin signatures (shortcodes, blocks, meta prefixes) are discovered by scanning plugin PHP sources and cached for 24 hours. The site content index is stored under uploads and rebuilt when content or settings change.
 
 **Multisite**
 
@@ -94,8 +94,10 @@ TSO Stack Inspector stores only:
 * Temporary scan job data in transients (auto-expire)
 * Optional site-index cache, scan-history JSON, and replace-backup JSON under `wp-content/uploads/tso-stack-inspector/` (local disk only; directory is denied via `.htaccess` / `web.config` + empty `index.html`; removed on uninstall when possible)
 * Replace backup index in `wp_options` (`tso_stack_inspector_replace_backups`, ~48h retention)
+* A short list of your own public URLs that answered 404 when sampled, in a transient (one week)
+* The last read of your own public pages, as compressed JSON under `wp-content/uploads/tso-stack-inspector/` (reused for two minutes, removed on uninstall)
 
-No data is transmitted to external servers. Scans run only when an administrator starts them from Tools → TSO Stack Inspector.
+No data is transmitted to external servers: the only requests the plugin makes go to your own site. Scans run only when an administrator starts them from Tools → TSO Stack Inspector.
 
 == Screenshots ==
 
@@ -110,7 +112,7 @@ No data is transmitted to external servers. Scans run only when an administrator
 * Replace refuses to edit content when the undo backup cannot be saved, and backup/history file names are harder to guess; Replace and Cancel now recover from network errors instead of freezing
 * Faster, more reliable scans: no posts processed twice when two requests overlap, much faster orphan finder, fixed double-encoded plugin links, and uninstall also removes leftover lock files
 * A merely activated plugin is no longer reported as "do not uninstall": only real usage (content, widgets, code calling it, tables with data, post types, scheduled tasks, dependencies, public output) blocks the verdict
-* The public site check now reads a sample of pages (home, latest posts and page, shop pages, one entry and archive per content type, one page per template) plus sitemaps, robots.txt and feeds, and lists the files and class names found and where
+* The public site check now reads a sample of pages (home, latest posts and page, shop pages, one entry and archive per content type, one page per template), reuses it for two minutes, skips pages that answer 404, and only reads robots.txt, sitemaps and feed for sitemap, SEO and feed plugins; the verdict lists the files and class names found and where
 * New: the verdict is graded with a priority (low/medium/high) and a confidence level (high/medium/low) with the reason, indirect hints are labelled, and widgets left in the inactive area and old non-public post types are reported with their volume and last edit date
 * Fewer false positives (log options and constants of other plugins, bundled libraries, Free/Pro editions, drop-ins, mu-plugins, the site's own domain) and new checks for Classic Editor, One User Avatar, UpdraftPlus and Options & Tables Cleaner
 
