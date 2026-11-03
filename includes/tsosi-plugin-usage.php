@@ -1181,35 +1181,134 @@ function tsosi_usage_frontend_items( $hits, $kinds ) {
 }
 
 /**
- * Public endpoints plugins usually generate (sitemaps, robots.txt, feed), read from this
- * same site. Only successful responses are kept.
+ * Read one public URL of this same site. Only a successful (200) answer is kept.
+ *
+ * @param string $url Absolute URL.
+ * @return string Lowercase body (capped), '' when it could not be read.
+ */
+function tsosi_usage_endpoint_fetch( $url ) {
+	$response = wp_remote_get(
+		$url,
+		array(
+			'timeout'     => 5,
+			'redirection' => 2,
+			'user-agent'  => 'TSO-Stack-Inspector/' . TSOSI_VERSION,
+		)
+	);
+	if ( is_wp_error( $response ) || 200 !== (int) wp_remote_retrieve_response_code( $response ) ) {
+		return '';
+	}
+	return strtolower( substr( (string) wp_remote_retrieve_body( $response ), 0, 200000 ) );
+}
+
+/**
+ * Sitemap URLs that robots.txt declares ("Sitemap: ..."), on this same site only.
+ *
+ * @param string $robots Body of robots.txt.
+ * @return string[] Absolute URLs (at most 3).
+ */
+function tsosi_usage_robots_sitemaps( $robots ) {
+	$urls = array();
+	if ( preg_match_all( '/^\s*sitemap:\s*(\S+)/im', (string) $robots, $m ) ) {
+		foreach ( $m[1] as $url ) {
+			$parts = wp_parse_url( (string) $url );
+			$host  = isset( $parts['host'] ) ? preg_replace( '/^www\./', '', strtolower( (string) $parts['host'] ) ) : '';
+			if ( isset( $parts['scheme'] ) && in_array( $parts['scheme'], array( 'http', 'https' ), true ) && tsosi_usage_is_site_host( (string) $host ) ) {
+				$urls[] = (string) $url;
+			}
+		}
+	}
+	return array_slice( array_values( array_unique( $urls ) ), 0, 3 );
+}
+
+/**
+ * Read the public endpoints plugins usually generate (robots.txt, sitemaps, feed) from this
+ * same site, asking only for URLs that should exist: the sitemaps robots.txt declares, plus
+ * /sitemap.xml; /sitemap_index.xml is a last resort when nothing else answered, so a site
+ * that has no such file is not filled with 404s in its log.
+ *
+ * @return array<string,string> Path => lowercase body (successful responses only).
+ */
+function tsosi_usage_endpoints_read() {
+	$out    = array();
+	$robots = tsosi_usage_endpoint_fetch( home_url( '/robots.txt' ) );
+	if ( '' !== $robots ) {
+		$out['/robots.txt'] = $robots;
+	}
+
+	$urls     = tsosi_usage_robots_sitemaps( $robots );
+	$fallback = home_url( '/sitemap.xml' );
+	if ( ! in_array( $fallback, $urls, true ) ) {
+		$urls[] = $fallback;
+	}
+	$found = false;
+	foreach ( $urls as $url ) {
+		$body = tsosi_usage_endpoint_fetch( $url );
+		if ( '' === $body ) {
+			continue;
+		}
+		$found = true;
+		$path  = (string) wp_parse_url( $url, PHP_URL_PATH );
+		$query = (string) wp_parse_url( $url, PHP_URL_QUERY );
+		$out[ $path . ( '' === $query ? '' : '?' . $query ) ] = $body;
+	}
+	if ( ! $found ) {
+		$body = tsosi_usage_endpoint_fetch( home_url( '/sitemap_index.xml' ) );
+		if ( '' !== $body ) {
+			$out['/sitemap_index.xml'] = $body;
+		}
+	}
+
+	$feed = tsosi_usage_endpoint_fetch( home_url( '/feed/' ) );
+	if ( '' !== $feed ) {
+		$out['/feed/'] = $feed;
+	}
+	return $out;
+}
+
+/**
+ * Public endpoints plugins usually generate (sitemaps, robots.txt, feed), read once per request.
  *
  * @return array<string,string> Path => lowercase body.
  */
 function tsosi_usage_endpoints_snapshot() {
 	static $memo = null;
-	if ( null !== $memo ) {
-		return $memo;
-	}
-	$memo = array();
-	foreach ( array( 'sitemap.xml', 'sitemap_index.xml', 'robots.txt', 'feed/' ) as $path ) {
-		$response = wp_remote_get(
-			home_url( '/' . $path ),
-			array(
-				'timeout'     => 5,
-				'redirection' => 2,
-				'user-agent'  => 'TSO-Stack-Inspector/' . TSOSI_VERSION,
-			)
-		);
-		if ( is_wp_error( $response ) || 200 !== (int) wp_remote_retrieve_response_code( $response ) ) {
-			continue;
-		}
-		$body = strtolower( substr( (string) wp_remote_retrieve_body( $response ), 0, 200000 ) );
-		if ( '' !== $body ) {
-			$memo[ '/' . $path ] = $body;
-		}
+	if ( null === $memo ) {
+		$memo = tsosi_usage_endpoints_read();
 	}
 	return $memo;
+}
+
+/**
+ * Whether a text (slug, name, description) suggests a plugin that generates sitemaps,
+ * robots.txt rules or feeds. Includes the Spanish and Catalan words for "site map".
+ *
+ * @param string $text Text to look at.
+ * @return bool
+ */
+function tsosi_usage_endpoint_text_is_relevant( $text ) {
+	return 1 === preg_match( '/sitemap|\bseo\b|robots|\bfeeds?\b|\brss\b|\batom\b|syndicat|\bxml\b|\bmapas?\b|\bmapes?\b/i', str_replace( array( '-', '_' ), ' ', (string) $text ) );
+}
+
+/**
+ * Whether it is worth reading the public endpoints for this plugin. Most plugins cannot
+ * appear there, so they cause no request at all.
+ *
+ * @param string $plugin_file Plugin basename.
+ * @return bool
+ */
+function tsosi_usage_endpoint_plugin_is_relevant( $plugin_file ) {
+	$plugins = tsosi_get_installed_plugins();
+	$header  = isset( $plugins[ $plugin_file ] ) && is_array( $plugins[ $plugin_file ] ) ? $plugins[ $plugin_file ] : array();
+	$text    = tsosi_usage_plugin_slug( $plugin_file ) . ' ' . ( isset( $header['Name'] ) ? $header['Name'] : '' ) . ' ' . ( isset( $header['Description'] ) ? $header['Description'] : '' );
+
+	/**
+	 * Filter whether the public endpoints (robots.txt, sitemaps, feed) are read for a plugin.
+	 *
+	 * @param bool   $relevant    Whether the plugin looks like a sitemap / SEO / feed plugin.
+	 * @param string $plugin_file Plugin basename.
+	 */
+	return (bool) apply_filters( 'tsosi_usage_endpoint_plugin_is_relevant', tsosi_usage_endpoint_text_is_relevant( $text ), $plugin_file );
 }
 
 /**
@@ -1272,8 +1371,11 @@ function tsosi_usage_identity_needles( $plugin_file ) {
  * @return string[] Evidence lines ("needle  →  /path").
  */
 function tsosi_usage_endpoint_hits( $plugin_file ) {
+	$items = array();
+	if ( ! tsosi_usage_endpoint_plugin_is_relevant( $plugin_file ) ) {
+		return $items;
+	}
 	$needles = tsosi_usage_identity_needles( $plugin_file );
-	$items   = array();
 	if ( empty( $needles ) ) {
 		return $items;
 	}
