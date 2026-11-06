@@ -200,8 +200,13 @@ function tsosi_sanitize_ignore_tokens( $tokens ) {
 
 	$clean = array();
 	foreach ( $tokens as $token ) {
-		$token = strtolower( trim( (string) $token ) );
-		if ( '' === $token || '#' === $token[0] ) {
+		$token = strtolower( (string) $token );
+		$hash  = strpos( $token, '#' );
+		if ( false !== $hash ) {
+			$token = substr( $token, 0, $hash ); // Comment: whole line or end of line.
+		}
+		$token = trim( $token );
+		if ( '' === $token ) {
 			continue;
 		}
 		$sanitized = preg_replace( '/[^a-z0-9\/_-]/', '', $token );
