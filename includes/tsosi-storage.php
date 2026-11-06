@@ -75,15 +75,6 @@ if ( ! defined( 'TSOSI_ADMIN_QUERY_REPLACE_FROM' ) ) {
 }
 
 /**
- * Verify AJAX nonce via WordPress core helper (soft fail).
- *
- * @return bool
- */
-function tsosi_verify_ajax_nonce() {
-	return (bool) check_ajax_referer( TSOSI_NONCE_AJAX, '_ajax_nonce', false );
-}
-
-/**
  * Require a valid AJAX nonce and manage_options. Sends JSON 403 and exits on failure.
  *
  * @return void
@@ -109,24 +100,6 @@ function tsosi_require_admin_form_nonce( $query_arg = '_wpnonce' ) {
 		$query_arg = '_wpnonce';
 	}
 	check_admin_referer( TSOSI_NONCE_FORM, $query_arg );
-}
-
-/**
- * Soft-verify admin form nonce (legacy callers). Prefer tsosi_require_admin_form_nonce().
- *
- * @param string $query_arg Request key holding the nonce.
- * @return bool
- */
-function tsosi_verify_admin_form_nonce( $query_arg = '_wpnonce' ) {
-	$query_arg = sanitize_key( (string) $query_arg );
-	if ( '' === $query_arg ) {
-		$query_arg = '_wpnonce';
-	}
-	$nonce = isset( $_REQUEST[ $query_arg ] ) ? sanitize_text_field( wp_unslash( $_REQUEST[ $query_arg ] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Verification itself; used only for soft bool return.
-	if ( '' === $nonce ) {
-		return false;
-	}
-	return (bool) wp_verify_nonce( $nonce, TSOSI_NONCE_FORM );
 }
 
 /**

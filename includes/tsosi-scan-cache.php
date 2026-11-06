@@ -544,61 +544,6 @@ function tsosi_scan_get_content_cache( $fingerprint ) {
 }
 
 /**
- * Build the needle-agnostic site index (posts + widgets/menus/options blobs).
- *
- * @param array<string,mixed>|null            $settings    Scan settings.
- * @param int[]|null                          $post_ids    Post IDs (collected when null).
- * @param array<int,array<string,mixed>>|null $extras Extra targets.
- * @param string|null                         $fingerprint Content fingerprint.
- * @return array{posts:array<int,array<string,mixed>>,extras:array<int,array<string,mixed>>}|null
- */
-function tsosi_scan_build_content_index( $settings = null, $post_ids = null, $extras = null, $fingerprint = null ) {
-	if ( ! tsosi_scan_content_cache_storage_ready() ) {
-		return null;
-	}
-
-	if ( ! is_array( $settings ) ) {
-		$settings = tsosi_get_scan_settings();
-	}
-	if ( ! is_array( $post_ids ) ) {
-		$post_ids = tsosi_scan_collect_post_ids( $settings );
-	}
-	if ( ! is_array( $extras ) ) {
-		$extras = tsosi_scan_collect_extra_targets( $settings );
-	}
-	if ( null === $fingerprint ) {
-		$fingerprint = tsosi_scan_content_fingerprint( $settings, $post_ids, $extras );
-	}
-
-	$index = array(
-		'posts'  => array(),
-		'extras' => array(),
-	);
-
-	foreach ( $post_ids as $post_id ) {
-		$source = tsosi_scan_extract_post_source( (int) $post_id );
-		if ( is_array( $source ) ) {
-			$index['posts'][] = $source;
-		}
-	}
-
-	foreach ( $extras as $target ) {
-		if ( ! is_array( $target ) ) {
-			continue;
-		}
-		$type = isset( $target['type'] ) ? sanitize_key( (string) $target['type'] ) : '';
-		if ( tsosi_scan_extra_is_needle_dependent( $type ) ) {
-			continue;
-		}
-		$index['extras'] = array_merge( $index['extras'], tsosi_scan_extract_extra_sources( $target ) );
-	}
-
-	tsosi_scan_save_content_cache( (string) $fingerprint, $index );
-
-	return $index;
-}
-
-/**
  * Return a valid site index when already cached. Does not block on a full rebuild.
  *
  * @param array<string,mixed>|null $settings Optional scan settings.
