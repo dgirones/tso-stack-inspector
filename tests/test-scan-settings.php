@@ -33,3 +33,11 @@ tsosi_test(
 		tsosi_assert_true( tsosi_scan_content_settings( $a ) !== tsosi_scan_content_settings( $d ), 'flags matter' );
 	}
 );
+
+tsosi_test(
+	'ignore list: # starts a comment, also at the end of a line',
+	function () {
+		$text = "# header comment\n_tsotab # keep views\nMy-Shortcode\n   \n#only comment\ncore/paragraph";
+		tsosi_assert_same( array( '_tsotab', 'my-shortcode', 'core/paragraph' ), tsosi_sanitize_ignore_tokens( $text ) );
+	}
+);

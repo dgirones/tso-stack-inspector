@@ -271,7 +271,7 @@ function tsosi_admin_render_settings_tab() {
 		'pending' => tsosi_ui_triple_text( 'Posts waiting for review.', 'Entradas pendientes de revisión.', 'Entrades pendents de revisió.' ),
 		'future'  => tsosi_ui_triple_text( 'Scheduled posts with a future date.', 'Entradas programadas con fecha futura.', 'Entrades programades amb data futura.' ),
 		'private' => tsosi_ui_triple_text( 'Private posts (admin-only visibility).', 'Entradas privadas (solo visibles para administradores).', 'Entrades privades (només visibles per a administradors).' ),
-		'inherit' => tsosi_ui_triple_text( 'FSE templates/parts that use the inherit status.', 'Plantillas/partes FSE con estado inherit.', 'Plantilles/partes FSE amb estat inherit.' ),
+		'inherit' => __( "Content types that inherit their parent's status (e.g. attachments). Site Editor templates, template parts, navigation and reusable blocks are always scanned, whatever you check here.", 'tso-stack-inspector' ),
 	);
 	foreach ( $statuses as $st ) {
 		$checked = in_array( $st, (array) $settings['post_statuses'], true );
@@ -354,10 +354,9 @@ function tsosi_admin_render_settings_tab() {
 	echo esc_textarea( $ignore_text );
 	echo '</textarea>';
 	echo '<span class="description tsosi-settings-field-help">' . esc_html(
-		tsosi_ui_triple_text(
-			'One shortcode tag, block name, or meta/option key per line. Matching scan rows, orphans, and inactive-plugin traces are hidden. Prefixes match from the start (e.g. _tsotab hides _tsotab_view_count). Lines starting with # are comments.',
-			'Un shortcode, nombre de bloque o clave meta/opción por línea. Se ocultan coincidencias del escaneo, huérfanos y rastros de plugins inactivos. Los prefijos coinciden desde el inicio (p. ej. _tsotab oculta _tsotab_view_count). Las líneas que empiezan por # son comentarios.',
-			'Un shortcode, nom de bloc o clau meta/opció per línia. S\'amaguen coincidències de l\'escaneig, orfes i rastres de plugins inactius. Els prefixos coincideixen des de l\'inici (p. ex. _tsotab amaga _tsotab_view_count). Les línies que comencen per # són comentaris.'
+		__(
+			'One shortcode tag, block name, or meta/option key per line. Matching scan rows, orphans, and inactive-plugin traces are hidden. Prefixes match from the start (e.g. _tsotab hides _tsotab_view_count). Everything after a # is a comment (a whole line or the end of a line).',
+			'tso-stack-inspector'
 		)
 	) . '</span>';
 	echo '</div></fieldset>';
