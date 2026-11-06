@@ -409,12 +409,12 @@
 			return '<th>' + escapeHtml(h) + '</th>';
 		}).join('');
 
-		return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + escapeHtml(title) +
+		return '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>' + escapeHtml(title) +
 			'</title><style>' + criticalCss + '</style>' +
 			(cssHref ? '<link rel="stylesheet" href="' + escapeAttr(cssHref) + '">' : '') +
 			'</head><body class="tsosi-report"><h1>' + escapeHtml(title) + '</h1><p>' +
-			escapeHtml(summaryText) + '</p><table><thead><tr>' + headCells +
-			'</tr></thead><tbody>' + rowsHtml + '</tbody></table></body></html>';
+			escapeHtml(summaryText) + '</p><div class="tsosi-report-scroll"><table class="tsosi-report-table"><thead><tr>' + headCells +
+			'</tr></thead><tbody>' + rowsHtml + '</tbody></table></div></body></html>';
 	}
 
 	function exportPdf() {
@@ -2025,3 +2025,67 @@
 		bind();
 	}
 })();
+
+;/* ==========================================================================
+   Mobile table labels. Pairs with the stacked-card table layout in
+   admin.css (max-width: 782px). Adds data-label to each body cell, copied from the
+   matching <thead> cell, for static tables and for tables rendered by JS
+   (scan results, orphans, inactive audit, replace preview, compare, history diff).
+   ========================================================================== */
+(function () {
+	'use strict';
+
+	function labelTable(table) {
+		var heads = Array.prototype.map.call(table.querySelectorAll('thead th'), function (th) {
+			return (th.textContent || '').trim();
+		});
+		if (!heads.length) {
+			return;
+		}
+		Array.prototype.forEach.call(table.querySelectorAll('tbody > tr'), function (tr) {
+			if (tr.getAttribute('data-tsosi-labeled')) {
+				return;
+			}
+			tr.setAttribute('data-tsosi-labeled', '1');
+			var col = 0;
+			Array.prototype.forEach.call(tr.children, function (cell) {
+				var span = parseInt(cell.getAttribute('colspan') || '1', 10) || 1;
+				if (cell.tagName === 'TD') {
+					if (span < heads.length) {
+						var label = heads.slice(col, col + span).filter(Boolean).join(' / ');
+						if (label) {
+							cell.setAttribute('data-label', label);
+						}
+					}
+					if (!(cell.textContent || '').trim() && !cell.querySelector('a, button, input, select, img')) {
+						cell.classList.add('tsosi-cell-empty');
+					}
+				}
+				col += span;
+			});
+		});
+	}
+
+	function labelAll() {
+		Array.prototype.forEach.call(document.querySelectorAll('.tsosi-wrap table.widefat'), labelTable);
+	}
+
+	var scheduled = false;
+	function schedule() {
+		if (scheduled) {
+			return;
+		}
+		scheduled = true;
+		window.requestAnimationFrame(function () {
+			scheduled = false;
+			labelAll();
+		});
+	}
+
+	labelAll();
+	var root = document.getElementById('wpbody-content');
+	if (root && window.MutationObserver) {
+		// childList only (no attributes): labelling never re-triggers the observer.
+		new window.MutationObserver(schedule).observe(root, { childList: true, subtree: true });
+	}
+}());

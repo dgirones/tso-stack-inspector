@@ -841,3 +841,304 @@ html[data-tsosi-theme="night"] .tsosi-wrap .notice a { color: #e8eaf0; }
 .tsosi-wrap .tsosi-cache-bar .button { font-size: 14px; line-height: 2; min-height: 34px; padding: 0 14px; }
 .tsosi-wrap .tsosi-cache-bar-cleaner { margin: 0 0 0 auto; }
 .tsosi-wrap .tsosi-cache-details summary { width: 22px; height: 22px; line-height: 22px; font-size: 13px; }
+
+/* ==========================================================================
+   Mobile / narrow-screen fixes.
+   WordPress admin breakpoint: 782px.
+   ========================================================================== */
+
+/* All widths: long unbroken tokens (shortcode names, theme_mods_*, URLs) must wrap. */
+.tsosi-wrap code {
+	overflow-wrap: anywhere;
+}
+
+/* All widths, night theme: checkboxes/radios must not stay bright white. */
+html[data-tsosi-theme="night"] .tsosi-wrap input[type="checkbox"],
+html[data-tsosi-theme="night"] .tsosi-wrap input[type="radio"] {
+	background-color: #232635;
+	border-color: #3a3f55;
+}
+
+/* All widths: the Options Cleaner link is a long sentence; .button is nowrap by default. */
+.tsosi-wrap .tsosi-cache-bar-cleaner {
+	max-width: 100%;
+}
+.tsosi-wrap .tsosi-cache-bar-cleaner .button {
+	white-space: normal;
+	max-width: 100%;
+	height: auto;
+	text-align: center;
+	line-height: 1.4;
+	padding-top: 6px;
+	padding-bottom: 6px;
+}
+
+@media (max-width: 782px) {
+
+	/* ----- Panels: reclaim horizontal space ----- */
+	.tsosi-wrap .tsosi-panel,
+	.tsosi-wrap .tsosi-scan-panel {
+		padding: 14px;
+		margin-bottom: 16px;
+	}
+
+	/* ----- Header: title, then language (full row), then theme + support ----- */
+	.tsosi-wrap .tsosi-header {
+		flex-direction: column;
+		align-items: stretch;
+		gap: 8px;
+	}
+	.tsosi-wrap .tsosi-header-actions {
+		justify-content: flex-start;
+		flex-shrink: 1;
+		width: 100%;
+		gap: 8px;
+	}
+	.tsosi-wrap .tsosi-header-actions .tsosi-lang-form {
+		flex: 1 1 100%;
+	}
+	.tsosi-wrap .tsosi-header-actions .tsosi-lang-form select {
+		flex: 0 1 auto;
+		min-width: 0;
+		min-height: 34px;
+	}
+	.tsosi-wrap .tsosi-theme-label {
+		display: inline;
+	}
+
+	/* ----- Cache strip: one column; help bubble stays inside the viewport ----- */
+	.tsosi-wrap .tsosi-cache-bar {
+		flex-direction: column;
+		align-items: stretch;
+	}
+	.tsosi-wrap .tsosi-cache-bar-cleaner {
+		margin: 0;
+		width: 100%;
+	}
+	.tsosi-wrap .tsosi-cache-bar-cleaner .button {
+		display: block;
+		width: 100%;
+		min-height: 40px;
+		padding: 8px 12px;
+	}
+	.tsosi-wrap .tsosi-cache-details {
+		position: static;
+	}
+	.tsosi-wrap .tsosi-cache-details .tsosi-field-help {
+		top: auto;
+		left: 0;
+		right: 0;
+		width: auto;
+		margin-top: 8px;
+	}
+
+	/* ----- Tabs: tidy grid instead of ragged wrapped rows ----- */
+	.tsosi-wrap .tsosi-tabs {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+		gap: 6px;
+		padding: 0;
+		border-bottom: 0;
+		margin-bottom: 12px;
+	}
+	.tsosi-wrap .tsosi-tabs .nav-tab {
+		float: none;
+		margin: 0;
+		min-width: 0;
+		padding: 8px 4px;
+		font-size: 13px;
+		line-height: 1.3;
+		text-align: center;
+		border: 1px solid #c3c4c7;
+		border-radius: 4px;
+		overflow-wrap: anywhere;
+	}
+	.tsosi-wrap .tsosi-tabs .nav-tab-active,
+	.tsosi-wrap .tsosi-tabs .nav-tab-active:hover,
+	.tsosi-wrap .tsosi-tabs .nav-tab-active:focus {
+		background: #fff;
+		border-color: #2271b1;
+		color: #1d2327;
+		box-shadow: inset 0 -2px 0 #2271b1;
+	}
+	html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-tabs .nav-tab {
+		border-color: #2e3245;
+	}
+	html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-tabs .nav-tab-active,
+	html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-tabs .nav-tab-active:hover,
+	html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-tabs .nav-tab-active:focus {
+		background: #1a1d27;
+		border-color: #72aee6;
+		color: #fff;
+		box-shadow: inset 0 -2px 0 #72aee6;
+	}
+
+	/* ----- Form controls: same full width everywhere ----- */
+	.tsosi-wrap .tsosi-form-row {
+		gap: 8px;
+		align-items: stretch;
+	}
+	.tsosi-wrap .tsosi-form-row label {
+		flex: 1 1 100%;
+		min-width: 0;
+	}
+	.tsosi-wrap .tsosi-panel select,
+	.tsosi-wrap .tsosi-panel input[type="text"],
+	.tsosi-wrap .tsosi-panel input[type="search"],
+	.tsosi-wrap .tsosi-panel textarea,
+	.tsosi-wrap .tsosi-scan-panel select,
+	.tsosi-wrap .tsosi-scan-panel input[type="text"],
+	.tsosi-wrap .tsosi-scan-panel input[type="search"],
+	.tsosi-wrap .tsosi-theme-select {
+		width: 100%;
+		min-width: 0;
+		max-width: 100%;
+		box-sizing: border-box;
+	}
+	.tsosi-wrap .tsosi-filter-input,
+	.tsosi-wrap .tsosi-scan-toolbar select {
+		flex: 1 1 100%;
+	}
+	.tsosi-wrap .tsosi-group-toggle {
+		margin-left: 0;
+		white-space: normal;
+	}
+	.tsosi-wrap .tsosi-scan-actions,
+	.tsosi-wrap .tsosi-scan-toolbar {
+		gap: 8px;
+	}
+	.tsosi-wrap .tsosi-scan-actions .tsosi-background-option {
+		flex: 1 1 100%;
+		margin: 0;
+	}
+	.tsosi-wrap .tsosi-scan-actions .button {
+		flex: 1 1 auto;
+		white-space: normal;
+		text-align: center;
+	}
+	.tsosi-wrap .tsosi-scan-actions #tsosi-open-cleaner,
+	.tsosi-wrap .tsosi-scan-toolbar .button {
+		flex: 1 1 100%;
+	}
+	.tsosi-wrap .tsosi-settings-field-help {
+		margin-left: 34px;
+	}
+	.tsosi-wrap .button-small {
+		min-height: 36px;
+		line-height: 34px;
+	}
+
+	/* ----- Risk banner: in a column layout flex-basis means HEIGHT; reset it ----- */
+	.tsosi-wrap .tsosi-risk-main,
+	.tsosi-wrap .tsosi-checklist,
+	.tsosi-wrap .tsosi-usage {
+		flex: 0 0 auto;
+		min-width: 0;
+		max-width: none;
+	}
+	.tsosi-wrap .tsosi-risk-cta .button {
+		white-space: normal;
+		height: auto;
+		min-height: 40px;
+		line-height: 1.4;
+		padding-top: 8px;
+		padding-bottom: 8px;
+	}
+	.tsosi-wrap .tsosi-usage-item {
+		font-size: 15px;
+		padding: 10px 12px;
+	}
+	.tsosi-wrap .tsosi-usage-more ul {
+		max-height: 180px;
+	}
+
+	/* ----- Tables: stacked cards (labels come from data-label, set by admin.js) ----- */
+	.tsosi-wrap table.widefat {
+		display: block;
+		width: 100%;
+		max-width: 100%;
+		table-layout: auto;
+		border: 0;
+		box-shadow: none;
+		background: transparent;
+	}
+	.tsosi-wrap table.widefat thead {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip: rect(0 0 0 0);
+		white-space: nowrap;
+	}
+	.tsosi-wrap table.widefat tbody {
+		display: block;
+	}
+	.tsosi-wrap table.widefat > tbody > tr:nth-child(n) {
+		display: block;
+		margin: 0 0 10px;
+		padding: 4px 0;
+		background: #fff;
+		border: 1px solid #dcdcde;
+		border-radius: 4px;
+	}
+	.tsosi-wrap table.widefat > tbody > tr > td,
+	.tsosi-wrap table.widefat > tbody > tr > th {
+		display: block;
+		width: auto;
+		padding: 6px 12px;
+		border: 0;
+		background: transparent;
+		white-space: normal;
+		overflow-wrap: anywhere;
+	}
+	.tsosi-wrap table.widefat > tbody > tr > .tsosi-cell-empty {
+		display: none;
+	}
+	.tsosi-wrap table.widefat > tbody > tr > td[data-label]::before {
+		content: attr(data-label);
+		display: block;
+		margin: 0 0 2px;
+		font-size: 11px;
+		font-weight: 600;
+		line-height: 1.4;
+		letter-spacing: 0.03em;
+		text-transform: uppercase;
+		color: #646970;
+	}
+	.tsosi-wrap table.widefat > tbody > tr > th {
+		font-weight: 600;
+		border-bottom: 1px solid #f0f0f1;
+		margin-bottom: 2px;
+	}
+	.tsosi-wrap .tsosi-compare-table tbody th {
+		width: auto;
+	}
+	.tsosi-wrap .tsosi-history-actions {
+		white-space: normal;
+	}
+	.tsosi-wrap .tsosi-history-actions .button {
+		margin: 0 6px 6px 0;
+	}
+	.tsosi-wrap .tsosi-compare-results,
+	.tsosi-wrap .tsosi-history-diff-table-wrap {
+		overflow-x: visible;
+	}
+	.tsosi-wrap .tsosi-match-type {
+		min-width: 0;
+		margin-right: 6px;
+	}
+
+	html[data-tsosi-theme="night"] .tsosi-wrap table.widefat > tbody > tr:nth-child(n) {
+		background: #1a1d27;
+		border-color: #2e3245;
+	}
+	html[data-tsosi-theme="night"] .tsosi-wrap table.widefat.striped > tbody > tr:nth-child(n) > * {
+		background: transparent;
+	}
+	html[data-tsosi-theme="night"] .tsosi-wrap table.widefat > tbody > tr > td[data-label]::before {
+		color: #c5c9d6;
+	}
+	html[data-tsosi-theme="night"] .tsosi-wrap table.widefat > tbody > tr > th {
+		border-bottom-color: #2e3245;
+	}
+}

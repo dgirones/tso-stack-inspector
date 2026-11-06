@@ -107,3 +107,44 @@ body.tsosi-report {
 		text-decoration: underline;
 	}
 }
+
+/* ==========================================================================
+   Printable report on phones (needs the viewport meta + table markup in admin.js buildReportHtml).
+   ========================================================================== */
+
+.tsosi-report-scroll {
+	overflow-x: auto;
+	-webkit-overflow-scrolling: touch;
+}
+
+.tsosi-report-table th,
+.tsosi-report-table td {
+	overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+	body.tsosi-report {
+		padding: 16px 12px 32px;
+	}
+
+	.tsosi-report-header h1,
+	body.tsosi-report > h1 {
+		font-size: 18px;
+		line-height: 1.3;
+	}
+
+	.tsosi-report-table {
+		font-size: 12px;
+	}
+
+	.tsosi-report-table th,
+	.tsosi-report-table td {
+		padding: 6px 8px;
+	}
+}
+
+@media print {
+	.tsosi-report-scroll {
+		overflow: visible;
+	}
+}
