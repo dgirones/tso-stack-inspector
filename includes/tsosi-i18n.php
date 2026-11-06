@@ -105,7 +105,24 @@ function tsosi_load_textdomain() {
 		return;
 	}
 
-	$domain     = 'tso-stack-inspector';
+	$domain = 'tso-stack-inspector';
+
+	// An explicit language chosen in the plugin wins over the WordPress locale, so gettext
+	// strings and the hard-coded EN/ES/CA strings always show in the same language.
+	$pin = tsosi_get_ui_lang_pin();
+	if ( 'en' === $pin ) {
+		$did_load = true;
+		return;
+	}
+	if ( 'es' === $pin || 'ca' === $pin ) {
+		$mofile = TSOSI_PATH . 'languages/' . $domain . '-' . ( 'es' === $pin ? 'es_ES' : 'ca' ) . '.mo';
+		if ( file_exists( $mofile ) ) {
+			load_textdomain( $domain, $mofile );
+		}
+		$did_load = true;
+		return;
+	}
+
 	$locale     = function_exists( 'determine_locale' ) ? determine_locale() : get_locale();
 	$candidates = array( (string) $locale );
 

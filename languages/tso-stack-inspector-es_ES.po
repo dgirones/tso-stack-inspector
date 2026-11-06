@@ -67,3 +67,30 @@ msgstr ""
 "prefijos coinciden desde el inicio (p. ej. _tsotab oculta "
 "_tsotab_view_count). Todo lo que va después de # es un comentario (una línea"
 " entera o el final de una línea)."
+
+msgid "Find and replace values are the same."
+msgstr "Los valores de búsqueda y reemplazo son iguales."
+
+msgid "Select a valid theme."
+msgstr "Selecciona un tema válido."
+
+msgid "Scan session expired. Please start again."
+msgstr "La sesión de escaneo ha caducado. Vuelve a empezar."
+
+msgid "History entry not found."
+msgstr "No se ha encontrado la entrada del historial."
+
+msgid "Invalid replace type."
+msgstr "Tipo de reemplazo no válido."
+
+msgid "Unknown tab."
+msgstr "Pestaña desconocida."
+
+msgid "Enter both find and replace values."
+msgstr "Introduce los valores de búsqueda y de reemplazo."
+
+msgid "Select two plugins."
+msgstr "Selecciona dos plugins."
+
+msgid "Plugin signatures are not ready."
+msgstr "Las firmas de los plugins aún no están listas."
