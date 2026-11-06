@@ -1142,3 +1142,81 @@ html[data-tsosi-theme="night"] .tsosi-wrap input[type="radio"] {
 		border-bottom-color: #2e3245;
 	}
 }
+
+/* ==========================================================================
+   Mobile consistency pass (2).
+   ========================================================================== */
+
+/* All widths: long tokens must never push the page sideways. */
+.tsosi-wrap {
+	box-sizing: border-box;
+	overflow-wrap: break-word;
+}
+.tsosi-wrap pre {
+	max-width: 100%;
+	overflow-x: auto;
+}
+.tsosi-wrap .tsosi-tag-list li {
+	max-width: 100%;
+	overflow-wrap: anywhere;
+}
+.tsosi-wrap .tsosi-usage-item {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+/* Night theme: usage rows, links and the cache help icon were unreadable. */
+html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-usage { border-top-color: rgba(255, 255, 255, 0.15); }
+html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-usage-item { background: rgba(255, 255, 255, 0.07); }
+html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-usage-more summary { color: #72aee6; }
+html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-cache-details summary { border-color: #6b7089; color: #c5c9d6; }
+html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-compare-table thead th { background: #232635; }
+
+@media (max-width: 782px) {
+
+	/* Stacked-card tables: first cell of a card is the title, keep it readable. */
+	.tsosi-wrap table.widefat > tbody > tr > td:first-child:not([data-label]) {
+		font-weight: 600;
+	}
+
+	/* Number / small inputs and checkbox rows: comfortable touch targets. */
+	.tsosi-wrap .tsosi-panel input.small-text {
+		width: 100%;
+		max-width: 120px;
+	}
+	.tsosi-wrap .tsosi-check-row,
+	.tsosi-wrap .tsosi-settings-field label {
+		display: block;
+		line-height: 1.6;
+	}
+	.tsosi-wrap .tsosi-check-row input[type="checkbox"],
+	.tsosi-wrap .tsosi-settings-field input[type="checkbox"] {
+		margin-top: 2px;
+	}
+
+	/* Prevent a stray button group from overflowing the card. */
+	.tsosi-wrap .tsosi-history-actions .button,
+	.tsosi-wrap .tsosi-cache-bar-main .button {
+		white-space: normal;
+		height: auto;
+		min-height: 36px;
+	}
+
+	/* Diff stats: two per row instead of a ragged flow. */
+	.tsosi-wrap .tsosi-history-diff-stat {
+		flex: 1 1 calc(50% - 6px);
+		min-width: 0;
+	}
+	.tsosi-wrap .tsosi-history-diff-box {
+		padding: 12px;
+	}
+	.tsosi-wrap .tsosi-match-line {
+		overflow-wrap: anywhere;
+	}
+}
+
+@media (max-width: 360px) {
+	.tsosi-wrap .tsosi-tabs {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+}
