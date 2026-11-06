@@ -130,26 +130,4 @@ No data is transmitted to external servers: the only requests the plugin makes g
 * Compact header and cache strip, faster AJAX tab switching, CSV export opens correctly in Spanish/Catalan Excel, background scans chained as one-off cron events
 * Theme scan falls back to the active theme; shortcode/block risk wording is tag-scoped; Refresh signatures starts at once
 
-= 1.0.2 =
-* Support (Ko-fi) donation button in the admin header
-* New: Auto/Day/Night plugin visuals 
-* Scan, compare and replace buttons stay disabled until a plugin, shortcode, block or theme is chosen
-* History "View" now scrolls to the loaded results and reports errors
-* Built-in signatures for Elementor and Elementor Pro (elementor-template shortcode, _elementor_ meta)
-* Replace no longer strips backslashes from post content (block JSON, escaped quotes), also when undoing
-* Core blocks can be searched as core/paragraph or paragraph; blocks stored in page-builder JSON are detected
-* Orphan finder no longer flags shortcodes/blocks of active plugins that only register on the front end
-
-= 1.0.1 =
-* Faster first load: the admin screen opens immediately and prepares plugin signatures in the background with a progress notice
-* Plugin signature discovery walks each plugin folder once (skipping vendor/node_modules) and reads each file once
-* Single-file plugins are no longer profiled with the whole plugins folder
-* Site index checks no longer decode the cached index on every page load
-* Faster site index build (time-boxed steps with primed post caches) and faster cached scans/audits (posts are loaded only on a match)
-* Site index stores compact shortcode/block digests instead of full post content and page-builder meta (much smaller, faster to load and scan)
-* Obsolete site-index files are deleted when a new index is saved instead of piling up in uploads
-* Scans and the inactive-plugins audit wait for the background signature warm-up instead of building every profile inside one request
-* Inactive-plugins audit reads user/term/comment meta keys once instead of once per plugin
-
-= 1.0.0 =
-* First version
+See changelog.txt in the plugin folder for older versions.
