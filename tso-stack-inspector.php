@@ -2,7 +2,7 @@
 /**
  * Plugin Name: TSO Stack Inspector
  * Description: Find where plugin shortcodes, blocks, and metadata are used before you deactivate or uninstall.
- * Version:     1.0.5
+ * Version:     1.0.6
  * Author:      Tu Soporte Online
  * Author URI:  https://www.tusoporteonline.es/blog
  * Requires at least: 6.1
@@ -23,7 +23,7 @@ if ( ! defined( 'TSOSI_FILE' ) ) {
 }
 
 if ( ! defined( 'TSOSI_VERSION' ) ) {
-	define( 'TSOSI_VERSION', '1.0.5' );
+	define( 'TSOSI_VERSION', '1.0.6' );
 }
 
 if ( ! defined( 'TSOSI_PATH' ) ) {
