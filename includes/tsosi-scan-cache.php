@@ -484,7 +484,7 @@ function tsosi_scan_content_fingerprint( $settings, $post_ids, $extras ) {
 	$payload = array(
 		'v'            => 3, // 3: digests unescape JSON slashes so builder-stored block names match.
 		'blog_id'      => get_current_blog_id(),
-		'settings'     => $settings,
+		'settings'     => tsosi_scan_content_settings( $settings ),
 		'post_count'   => count( $post_ids ),
 		'extra_count'  => count( $extras ),
 		'max_modified' => tsosi_scan_get_max_post_modified_gmt(),

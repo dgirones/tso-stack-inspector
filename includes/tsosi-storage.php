@@ -358,6 +358,22 @@ function tsosi_get_scan_settings() {
 }
 
 /**
+ * Settings that change what gets indexed (excludes ignore list and history size).
+ *
+ * @param array<string,mixed> $settings Scan settings.
+ * @return array<string,mixed>
+ */
+function tsosi_scan_content_settings( $settings ) {
+	$settings = is_array( $settings ) ? $settings : array();
+	unset( $settings['ignore_tokens'], $settings['history_max'] );
+	$statuses = isset( $settings['post_statuses'] ) ? (array) $settings['post_statuses'] : array();
+	sort( $statuses );
+	$settings['post_statuses'] = $statuses;
+	ksort( $settings );
+	return $settings;
+}
+
+/**
  * Update scan settings.
  *
  * @param array<string,mixed> $settings Settings.
@@ -368,15 +384,24 @@ function tsosi_update_scan_settings( $settings ) {
 		return;
 	}
 	$fallbacks = tsosi_get_default_scan_settings();
-	$clean     = array(
-		'post_statuses'                => array_values(
-			array_filter(
-				array_map(
-					'sanitize_key',
-					(array) ( $settings['post_statuses'] ?? $fallbacks['post_statuses'] )
-				)
-			)
-		),
+	$allowed   = array( 'publish', 'draft', 'pending', 'future', 'private', 'inherit' );
+	$statuses  = array_values(
+		array_intersect(
+			$allowed,
+			array_map( 'sanitize_key', (array) ( $settings['post_statuses'] ?? $fallbacks['post_statuses'] ) )
+		)
+	);
+	if ( empty( $statuses ) ) {
+		// Nothing checked would silently scan only "publish" (WP_Query default): use the defaults instead.
+		$statuses = $fallbacks['post_statuses'];
+	}
+	$history_max = absint( $settings['history_max'] ?? TSOSI_SCAN_HISTORY_MAX_DEFAULT );
+	if ( 0 === $history_max ) {
+		// Empty or 0 would clamp to 1 and delete almost the whole history.
+		$history_max = TSOSI_SCAN_HISTORY_MAX_DEFAULT;
+	}
+	$clean = array(
+		'post_statuses'                => $statuses,
 		'include_reusable_blocks'      => ! empty( $settings['include_reusable_blocks'] ),
 		'include_widgets'              => ! empty( $settings['include_widgets'] ),
 		'include_menus'                => ! empty( $settings['include_menus'] ),
@@ -385,17 +410,15 @@ function tsosi_update_scan_settings( $settings ) {
 		'include_term_meta'            => ! empty( $settings['include_term_meta'] ),
 		'include_comment_meta'         => ! empty( $settings['include_comment_meta'] ),
 		'include_theme_mods'           => ! empty( $settings['include_theme_mods'] ),
-		'history_max'                  => max(
-			1,
-			min(
-				TSOSI_SCAN_HISTORY_MAX_HARD,
-				absint( $settings['history_max'] ?? TSOSI_SCAN_HISTORY_MAX_DEFAULT )
-			)
-		),
+		'history_max'                  => max( 1, min( TSOSI_SCAN_HISTORY_MAX_HARD, $history_max ) ),
 		'ignore_tokens'                => tsosi_sanitize_ignore_tokens( $settings['ignore_tokens'] ?? array() ),
 	);
+	$previous = tsosi_get_scan_settings();
 	update_option( TSOSI_OPTION_SCAN_SETTINGS, $clean );
-	tsosi_flush_all_content_caches();
+	// The ignore list and history size are applied after the index is read: only rebuild when the content scope changed.
+	if ( tsosi_scan_content_settings( $previous ) !== tsosi_scan_content_settings( $clean ) ) {
+		tsosi_flush_all_content_caches();
+	}
 	tsosi_scan_history_enforce_max();
 }
 
