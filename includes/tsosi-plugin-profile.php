@@ -52,17 +52,6 @@ function tsosi_get_plugin_folder_raw( $plugin_file ) {
 }
 
 /**
- * Returns the sanitized plugin folder key.
- *
- * @param string $plugin_file Plugin basename.
- * @return string Sanitized folder key for maps/logs.
- */
-function tsosi_get_plugin_folder( $plugin_file ) {
-	$folder = tsosi_get_plugin_folder_raw( $plugin_file );
-	return '' === $folder ? '' : sanitize_key( $folder );
-}
-
-/**
  * Absolute path to a plugin directory.
  *
  * @param string $plugin_file Plugin basename.

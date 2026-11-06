@@ -82,24 +82,6 @@ function tsosi_admin_enqueue_assets( $hook_suffix ) {
 add_action( 'admin_enqueue_scripts', 'tsosi_admin_enqueue_assets' );
 
 /**
- * Inline report CSS for printable popup (avoids external stylesheet on blob: URLs).
- *
- * @return string
- */
-function tsosi_admin_get_report_css_inline() {
-	if ( ! defined( 'TSOSI_PATH' ) ) {
-		return '';
-	}
-	$path = TSOSI_PATH . 'assets/css/report.css';
-	if ( ! is_readable( $path ) ) {
-		return '';
-	}
-	// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- static plugin asset for print report.
-	$css = file_get_contents( $path );
-	return is_string( $css ) ? $css : '';
-}
-
-/**
  * Config passed to admin.js.
  *
  * @return array<string,mixed>

@@ -709,12 +709,6 @@ html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-risk-pill.tsosi-risk-unknown {
 html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-donate-btn { background: #3a2f14; border-color: #b58a4a; color: #ffd591; }
 html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-donate-btn:hover { background: #4a3a18; color: #ffe2b0; }
 
-@media (max-width: 782px) {
-	.tsosi-wrap .tsosi-header { flex-direction: column; align-items: stretch; }
-	.tsosi-wrap .tsosi-header-actions { justify-content: flex-start; }
-	.tsosi-wrap .tsosi-theme-label { display: none; }
-}
-
 /* Dropdowns must read as dropdowns in both themes. */
 .tsosi-wrap select {
 	cursor: pointer;
@@ -806,10 +800,6 @@ html[data-tsosi-theme="night"] .tsosi-wrap .button-link-delete { color: #ff8085;
 	list-style: disc;
 	max-height: 220px;
 	overflow: auto;
-}
-
-.tsosi-usage-checked {
-	margin: 6px 0 0;
 }
 
 .tsosi-audit-reasons {
