@@ -100,3 +100,55 @@ msgstr ""
 
 msgid "Scan session expired. Please start again."
 msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Type"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Name"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Matches"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Samples"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Plugin"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "File"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Content"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Data"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Risk"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Risk detail"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Confidence"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Shortcode"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Block"
+msgstr ""

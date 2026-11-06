@@ -103,6 +103,12 @@ function tsosi_admin_get_js_config() {
 		'indexStorageReady' => tsosi_scan_content_cache_storage_ready(),
 		'ignoreTokens'      => array_values( (array) ( $settings['ignore_tokens'] ?? array() ) ),
 		'csvHeaders'        => tsosi_reports_csv_headers(),
+		'csvHeadersOrphans' => tsosi_reports_orphans_csv_headers(),
+		'csvHeadersInactive' => tsosi_reports_inactive_csv_headers(),
+		'csvTypeLabels'     => array(
+			'shortcode' => __( 'Shortcode', 'tso-stack-inspector' ),
+			'block'     => __( 'Block', 'tso-stack-inspector' ),
+		),
 		'reportCssUrl'      => $base . 'assets/css/report.css',
 		'reportCssVer'      => tsosi_admin_asset_file_version( 'assets/css/report.css' ),
 		'siteName'          => wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES ),

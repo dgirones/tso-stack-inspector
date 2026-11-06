@@ -94,3 +94,42 @@ msgstr "Selecciona dos plugins."
 
 msgid "Plugin signatures are not ready."
 msgstr "Las firmas de los plugins aún no están listas."
+
+msgid "Type"
+msgstr "Tipo"
+
+msgid "Name"
+msgstr "Nombre"
+
+msgid "Matches"
+msgstr "Coincidencias"
+
+msgid "Samples"
+msgstr "Ejemplos"
+
+msgid "Plugin"
+msgstr "Plugin"
+
+msgid "File"
+msgstr "Archivo"
+
+msgid "Content"
+msgstr "Contenido"
+
+msgid "Data"
+msgstr "Datos"
+
+msgid "Risk"
+msgstr "Riesgo"
+
+msgid "Risk detail"
+msgstr "Detalle del riesgo"
+
+msgid "Confidence"
+msgstr "Confianza"
+
+msgid "Shortcode"
+msgstr "Shortcode"
+
+msgid "Block"
+msgstr "Bloque"

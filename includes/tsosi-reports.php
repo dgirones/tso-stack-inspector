@@ -24,6 +24,38 @@ function tsosi_reports_csv_headers() {
 	);
 }
 
+/**
+ * CSV column headers for the orphans export (same order as `wp tsosi orphans --format=csv`).
+ *
+ * @return string[]
+ */
+function tsosi_reports_orphans_csv_headers() {
+	return array(
+		__( 'Type', 'tso-stack-inspector' ),
+		__( 'Name', 'tso-stack-inspector' ),
+		__( 'Matches', 'tso-stack-inspector' ),
+		__( 'Samples', 'tso-stack-inspector' ),
+	);
+}
+
+/**
+ * CSV column headers for the inactive-plugins audit export (same order as the CLI).
+ *
+ * @return string[]
+ */
+function tsosi_reports_inactive_csv_headers() {
+	return array(
+		__( 'Plugin', 'tso-stack-inspector' ),
+		__( 'File', 'tso-stack-inspector' ),
+		__( 'Matches', 'tso-stack-inspector' ),
+		__( 'Content', 'tso-stack-inspector' ),
+		__( 'Data', 'tso-stack-inspector' ),
+		__( 'Risk', 'tso-stack-inspector' ),
+		__( 'Risk detail', 'tso-stack-inspector' ),
+		__( 'Confidence', 'tso-stack-inspector' ),
+	);
+}
+
 // Row formatting and report-title text live client-side in assets/js/admin.js
 // (exportCsv()/buildReportHtml()), which is the only consumer of CSV/PDF export —
 // keep that JS as the single source of truth instead of duplicating it here.

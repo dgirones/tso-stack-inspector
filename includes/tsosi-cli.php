@@ -29,7 +29,7 @@ require_once TSOSI_PATH . 'includes/class-tsosi-cli-audit-inactive-command.php';
 function tsosi_cli_csv_escape( $value ) {
 	$value = (string) $value;
 	// Neutralise spreadsheet formulas (CSV injection); plain numbers are left alone.
-	if ( preg_match( '/^[=+\-@\t\r]/', $value ) && ! is_numeric( $value ) ) {
+	if ( preg_match( '/^[=+\-@\t\r]/', $value ) && ! preg_match( '/^-?\d+(\.\d+)?$/', $value ) ) { // Same rule as the browser export.
 		$value = "'" . $value;
 	}
 	if ( preg_match( '/[",\n\r]/', $value ) ) {

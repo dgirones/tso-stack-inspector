@@ -43,13 +43,14 @@ class TSOSI_CLI_Audit_Inactive_Command {
 				continue;
 			}
 			$rows[] = array(
-				'plugin'    => isset( $row['name'] ) ? (string) $row['name'] : '',
-				'file'      => isset( $row['plugin_file'] ) ? (string) $row['plugin_file'] : '',
-				'matches'   => isset( $row['match_count'] ) ? (int) $row['match_count'] : 0,
-				'content'   => isset( $row['content'] ) ? (int) $row['content'] : 0,
-				'data'      => isset( $row['data'] ) ? (int) $row['data'] : 0,
-				'risk'      => isset( $row['risk_level'] ) ? (string) $row['risk_level'] : '',
-				'confidence'=> isset( $row['confidence'] ) ? (string) $row['confidence'] : '',
+				'plugin'     => isset( $row['name'] ) ? (string) $row['name'] : '',
+				'file'       => isset( $row['plugin_file'] ) ? (string) $row['plugin_file'] : '',
+				'matches'    => isset( $row['match_count'] ) ? (int) $row['match_count'] : 0,
+				'content'    => isset( $row['content'] ) ? (int) $row['content'] : 0,
+				'data'       => isset( $row['data'] ) ? (int) $row['data'] : 0,
+				'risk'       => isset( $row['risk_level'] ) ? (string) $row['risk_level'] : '',
+				'risk_detail' => isset( $row['risk_label'] ) ? (string) $row['risk_label'] : '',
+				'confidence' => isset( $row['confidence'] ) ? (string) $row['confidence'] : '',
 			);
 		}
 
@@ -67,12 +68,12 @@ class TSOSI_CLI_Audit_Inactive_Command {
 			return;
 		}
 		if ( 'csv' === $format ) {
-			WP_CLI::log( 'plugin,file,matches,content,data,risk,confidence' );
+			WP_CLI::log( 'plugin,file,matches,content,data,risk,risk_detail,confidence' );
 			foreach ( $rows as $row ) {
 				WP_CLI::log( implode( ',', array_map( 'tsosi_cli_csv_escape', $row ) ) );
 			}
 			return;
 		}
-		WP_CLI\Utils\format_items( 'table', $rows, array( 'plugin', 'file', 'matches', 'content', 'data', 'risk', 'confidence' ) );
+		WP_CLI\Utils\format_items( 'table', $rows, array( 'plugin', 'file', 'matches', 'content', 'data', 'risk', 'risk_detail', 'confidence' ) );
 	}
 }
