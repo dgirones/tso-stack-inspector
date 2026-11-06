@@ -109,21 +109,19 @@ function tsosi_load_textdomain() {
 
 	// An explicit language chosen in the plugin wins over the WordPress locale, so gettext
 	// strings and the hard-coded EN/ES/CA strings always show in the same language.
+	// English is the source language: nothing to load.
 	$pin = tsosi_get_ui_lang_pin();
 	if ( 'en' === $pin ) {
 		$did_load = true;
 		return;
 	}
-	if ( 'es' === $pin || 'ca' === $pin ) {
-		$mofile = TSOSI_PATH . 'languages/' . $domain . '-' . ( 'es' === $pin ? 'es_ES' : 'ca' ) . '.mo';
-		if ( file_exists( $mofile ) ) {
-			load_textdomain( $domain, $mofile );
-		}
-		$did_load = true;
-		return;
+	if ( 'es' === $pin ) {
+		$locale = 'es_ES';
+	} elseif ( 'ca' === $pin ) {
+		$locale = 'ca';
+	} else {
+		$locale = function_exists( 'determine_locale' ) ? determine_locale() : get_locale();
 	}
-
-	$locale     = function_exists( 'determine_locale' ) ? determine_locale() : get_locale();
 	$candidates = array( (string) $locale );
 
 	if ( false !== strpos( (string) $locale, '_' ) ) {

@@ -907,6 +907,7 @@ html[data-tsosi-theme="night"] .tsosi-wrap input[type="radio"] {
 	}
 	.tsosi-wrap .tsosi-cache-bar-cleaner .button {
 		display: block;
+		box-sizing: border-box;
 		width: 100%;
 		min-height: 40px;
 		padding: 8px 12px;
@@ -1194,8 +1195,9 @@ html[data-tsosi-theme="night"] .tsosi-wrap .tsosi-compare-table thead th { backg
 
 	/* Diff stats: two per row instead of a ragged flow. */
 	.tsosi-wrap .tsosi-history-diff-stat {
-		flex: 1 1 calc(50% - 6px);
+		flex: 1 1 calc(50% - 8px);
 		min-width: 0;
+		box-sizing: border-box;
 	}
 	.tsosi-wrap .tsosi-history-diff-box {
 		padding: 12px;
