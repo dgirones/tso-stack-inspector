@@ -158,6 +158,9 @@ function tsosi_scan_collect_post_ids( $settings ) {
 	$statuses = isset( $settings['post_statuses'] ) && is_array( $settings['post_statuses'] )
 		? array_map( 'sanitize_key', $settings['post_statuses'] )
 		: array( 'publish' );
+	if ( empty( $statuses ) ) {
+		$statuses = array( 'publish' );
+	}
 
 	$post_types = tsosi_get_scannable_post_types();
 	if ( empty( $settings['include_reusable_blocks'] ) ) {
