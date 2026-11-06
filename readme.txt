@@ -6,7 +6,7 @@ Tags: shortcode, block, maintenance, gutenberg, uninstall
 Requires at least: 6.1
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.5
+Stable tag: 1.0.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -107,6 +107,14 @@ No data is transmitted to external servers: the only requests the plugin makes g
 4. Scan settings — background scan, history size limit, and ignore list.
 
 == Changelog ==
+
+= 1.0.6 =
+* Mobile admin: no horizontal overflow, readable usage rows in night mode, larger touch targets, tidier tables and tabs on small screens
+* Scan options: saving with no post status checked or an empty "Maximum saved scans" now falls back to the defaults; changing only the ignore list or history size no longer rebuilds the site index
+* Ignore list: everything after a # is a comment, also at the end of a line
+* Exports: the scan, orphans and inactive-plugins CSV files share one naming scheme (tso-stack-inspector-{scan|orphans|inactive}-YYYY-MM-DD.csv, local date), translated headers and values, and the same column order as WP-CLI; the CLI scan location and inactive audit (new risk_detail column) match the exports
+* Translations: texts follow the language chosen in the plugin, 9 untranslated messages and the translation template (.pot) completed
+* Removed unused code
 
 = 1.0.5 =
 * The verdict is graded: a priority (low/medium/high) and a confidence level (high/medium/low) with the reason, and indirect hints are labelled so they are not mistaken for proof; the inactive-plugins audit in WP-CLI also shows the confidence
