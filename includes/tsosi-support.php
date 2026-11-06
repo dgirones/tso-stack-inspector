@@ -42,19 +42,6 @@ function tsosi_get_kofi_donate_url() {
 }
 
 /**
- * Whether a locale string starts with a language code.
- *
- * @param string $locale Full locale (e.g. es_ES).
- * @param string $code   Language code (e.g. es).
- * @return bool
- */
-function tsosi_locale_starts_with( $locale, $code ) {
-	$locale = strtolower( (string) $locale );
-	$code   = strtolower( (string) $code );
-	return $code === $locale || 0 === strpos( $locale, $code . '_' ) || 0 === strpos( $locale, $code . '-' );
-}
-
-/**
  * Use .mo translation when loaded; otherwise ca/es string fallbacks for WP locale.
  *
  * @param string $english    English msgid.
@@ -68,11 +55,11 @@ function tsosi_gettext_with_locale_fallback( $english, $translated, $ca, $es ) {
 		return $translated;
 	}
 
-	$locale = function_exists( 'determine_locale' ) ? determine_locale() : get_locale();
-	if ( tsosi_locale_starts_with( $locale, 'ca' ) ) {
+	$lang = tsosi_get_ui_lang();
+	if ( 'ca' === $lang ) {
 		return $ca;
 	}
-	if ( tsosi_locale_starts_with( $locale, 'es' ) ) {
+	if ( 'es' === $lang ) {
 		return $es;
 	}
 

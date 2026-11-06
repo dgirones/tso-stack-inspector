@@ -326,6 +326,20 @@
 		return str;
 	}
 
+	// Local date (not UTC: toISOString() gives tomorrow's date late in the evening).
+	function localDateStamp() {
+		var d = new Date();
+		var pad = function (n) {
+			return (n < 10 ? '0' : '') + n;
+		};
+		return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+	}
+
+	// One naming scheme for every export: tso-stack-inspector-{scan|orphans|inactive}-YYYY-MM-DD.csv
+	function exportFilename(kind) {
+		return 'tso-stack-inspector-' + kind + '-' + localDateStamp() + '.csv';
+	}
+
 	function downloadCsv(filename, headers, rows) {
 		var delim = csvDelimiter();
 		var esc = function (cell) {
@@ -363,7 +377,7 @@
 				row.edit_url || '',
 			];
 		});
-		downloadCsv('stack-inspector-' + new Date().toISOString().slice(0, 10) + '.csv', headers, rows);
+		downloadCsv(exportFilename('scan'), headers, rows);
 	}
 
 	function reportStylesheetHref() {
@@ -1297,14 +1311,19 @@
 	}
 
 	function exportOrphansCsv() {
+		var labels = cfg.csvTypeLabels || {};
+		var headers = cfg.csvHeadersOrphans || ['Type', 'Name', 'Matches', 'Samples'];
+		var samples = function (row) {
+			return (row.samples || []).map(function (s) { return s.title || ''; }).join('; ');
+		};
 		var rows = [];
 		(lastOrphans.shortcodes || []).forEach(function (row) {
-			rows.push([row.tag || '', 'shortcode', row.count || 0, (row.samples || []).map(function (s) { return s.title || ''; }).join('; ')]);
+			rows.push([labels.shortcode || 'shortcode', row.tag || '', row.count || 0, samples(row)]);
 		});
 		(lastOrphans.blocks || []).forEach(function (row) {
-			rows.push([row.name || '', 'block', row.count || 0, (row.samples || []).map(function (s) { return s.title || ''; }).join('; ')]);
+			rows.push([labels.block || 'block', row.name || '', row.count || 0, samples(row)]);
 		});
-		downloadCsv('stack-inspector-orphans-' + new Date().toISOString().slice(0, 10) + '.csv', ['Tag', 'Type', 'Count', 'Samples'], rows);
+		downloadCsv(exportFilename('orphans'), headers, rows);
 	}
 
 	function runHistoryDiff() {
@@ -1377,7 +1396,7 @@
 		return title;
 	}
 
-	function riskBadge(level, needlesEmpty, rowTitle) {
+	function riskText(level, needlesEmpty) {
 		var label = i18n.riskSafe || 'Safe';
 		var cssLevel = level || 'safe';
 		if (level === 'danger') {
@@ -1388,8 +1407,13 @@
 			label = i18n.riskUnknown || 'Not checked';
 			cssLevel = 'unknown';
 		}
+		return { label: label, cssLevel: cssLevel };
+	}
+
+	function riskBadge(level, needlesEmpty, rowTitle) {
+		var text = riskText(level, needlesEmpty);
 		var titleAttr = rowTitle ? ' title="' + escapeAttr(rowTitle) + '"' : '';
-		return '<span class="tsosi-risk-pill tsosi-risk-' + escapeAttr(cssLevel) + '"' + titleAttr + '>' + escapeHtml(label) + '</span>';
+		return '<span class="tsosi-risk-pill tsosi-risk-' + escapeAttr(text.cssLevel) + '"' + titleAttr + '>' + escapeHtml(text.label) + '</span>';
 	}
 
 	function runInactiveAudit() {
@@ -1493,13 +1517,22 @@
 
 	function exportInactiveCsv() {
 		// risk_label carries the precise server-computed wording (e.g. "No signatures
-		// detected" vs "Likely safe to uninstall") -- exporting the coarse risk_level
-		// alone would flatten both into the same "safe" text, the same ambiguity fixed
-		// in the on-screen badge via riskBadge()'s needlesEmpty/title handling.
+		// detected" vs "Likely safe to uninstall"); the Risk column uses the same translated
+		// pill text as the on-screen badge.
+		var headers = cfg.csvHeadersInactive || ['Plugin', 'File', 'Matches', 'Content', 'Data', 'Risk', 'Risk detail', 'Confidence'];
 		var rows = (lastInactiveRows || []).map(function (row) {
-			return [row.name || '', row.plugin_file || '', row.match_count || 0, row.content || 0, row.data || 0, row.risk_level || '', row.risk_label || ''];
+			return [
+				row.name || '',
+				row.plugin_file || '',
+				row.match_count || 0,
+				row.content || 0,
+				row.data || 0,
+				riskText(row.risk_level, row.needles_empty).label,
+				row.risk_label || '',
+				confidenceName(row.confidence)
+			];
 		});
-		downloadCsv('stack-inspector-inactive-' + new Date().toISOString().slice(0, 10) + '.csv', ['Plugin', 'File', 'Matches', 'Content', 'Data', 'Risk', 'Risk detail'], rows);
+		downloadCsv(exportFilename('inactive'), headers, rows);
 	}
 
 	function refreshProfiles() {

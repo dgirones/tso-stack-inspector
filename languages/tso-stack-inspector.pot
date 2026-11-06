@@ -59,3 +59,96 @@ msgid ""
 "the start (e.g. _tsotab hides _tsotab_view_count). Everything after a # is a"
 " comment (a whole line or the end of a line)."
 msgstr ""
+
+msgid "Invalid replace type."
+msgstr ""
+
+msgid "Enter both find and replace values."
+msgstr ""
+
+msgid "Find and replace values are the same."
+msgstr ""
+
+msgid "Select a valid theme."
+msgstr ""
+
+msgid ""
+"Find where plugin shortcodes, blocks, and metadata are used before you "
+"deactivate or uninstall."
+msgstr ""
+
+msgid "Open inspector"
+msgstr ""
+
+msgid "Blog"
+msgstr ""
+
+msgid "Donate"
+msgstr ""
+
+msgid "Unknown tab."
+msgstr ""
+
+msgid "Plugin signatures are not ready."
+msgstr ""
+
+msgid "Select two plugins."
+msgstr ""
+
+msgid "History entry not found."
+msgstr ""
+
+msgid "Scan session expired. Please start again."
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Type"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Name"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Matches"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Samples"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Plugin"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "File"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Content"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Data"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Risk"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Risk detail"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Confidence"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Shortcode"
+msgstr ""
+
+#: includes/tsosi-reports.php
+msgid "Block"
+msgstr ""

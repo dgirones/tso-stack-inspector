@@ -67,3 +67,69 @@ msgstr ""
 "prefixos coincideixen des de l'inici (p. ex. _tsotab amaga "
 "_tsotab_view_count). Tot el que va després de # és un comentari (una línia "
 "sencera o el final d'una línia)."
+
+msgid "Find and replace values are the same."
+msgstr "Els valors de cerca i substitució són iguals."
+
+msgid "Select a valid theme."
+msgstr "Selecciona un tema vàlid."
+
+msgid "Scan session expired. Please start again."
+msgstr "La sessió d'escaneig ha caducat. Torna a començar."
+
+msgid "History entry not found."
+msgstr "No s'ha trobat l'entrada de l'historial."
+
+msgid "Invalid replace type."
+msgstr "Tipus de substitució no vàlid."
+
+msgid "Unknown tab."
+msgstr "Pestanya desconeguda."
+
+msgid "Enter both find and replace values."
+msgstr "Introdueix els valors de cerca i de substitució."
+
+msgid "Select two plugins."
+msgstr "Selecciona dos plugins."
+
+msgid "Plugin signatures are not ready."
+msgstr "Les signatures dels plugins encara no estan a punt."
+
+msgid "Type"
+msgstr "Tipus"
+
+msgid "Name"
+msgstr "Nom"
+
+msgid "Matches"
+msgstr "Coincidències"
+
+msgid "Samples"
+msgstr "Exemples"
+
+msgid "Plugin"
+msgstr "Plugin"
+
+msgid "File"
+msgstr "Fitxer"
+
+msgid "Content"
+msgstr "Contingut"
+
+msgid "Data"
+msgstr "Dades"
+
+msgid "Risk"
+msgstr "Risc"
+
+msgid "Risk detail"
+msgstr "Detall del risc"
+
+msgid "Confidence"
+msgstr "Confiança"
+
+msgid "Shortcode"
+msgstr "Shortcode"
+
+msgid "Block"
+msgstr "Bloc"

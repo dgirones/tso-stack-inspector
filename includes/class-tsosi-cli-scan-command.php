@@ -120,8 +120,13 @@ class TSOSI_CLI_Scan_Command {
 			if ( ! is_array( $row ) ) {
 				continue;
 			}
+			// Same label as the CSV/PDF export: object label (or source type) plus subtype.
+			$location = isset( $row['object_label'] ) && '' !== (string) $row['object_label'] ? (string) $row['object_label'] : ( isset( $row['source_type'] ) ? (string) $row['source_type'] : '' );
+			if ( ! empty( $row['object_subtype'] ) ) {
+				$location .= ' (' . (string) $row['object_subtype'] . ')';
+			}
 			$rows[] = array(
-				'location' => isset( $row['object_label'] ) ? (string) $row['object_label'] : '',
+				'location' => $location,
 				'type'     => isset( $row['match_type'] ) ? (string) $row['match_type'] : '',
 				'match'    => isset( $row['match_value'] ) ? (string) $row['match_value'] : '',
 				'context'  => isset( $row['context'] ) ? (string) $row['context'] : '',
